@@ -141,6 +141,29 @@ const Field = ({ label, children }) => (
   </div>
 );
 
+/* ─── APP ICON (Herz + Kreuztabelle) ─── */
+const AppIcon = ({ size = 32 }) => (
+  <svg width={size} height={size} viewBox="0 0 72 72" style={{ display: "block", flexShrink: 0 }}>
+    <defs>
+      <clipPath id="hclip">
+        <path d="M36 62 C36 62 8 44 8 24 C8 14 16 8 24 8 C29 8 33.5 10.5 36 14.5 C38.5 10.5 43 8 48 8 C56 8 64 14 64 24 C64 44 36 62 36 62Z"/>
+      </clipPath>
+    </defs>
+    <path d="M36 62 C36 62 8 44 8 24 C8 14 16 8 24 8 C29 8 33.5 10.5 36 14.5 C38.5 10.5 43 8 48 8 C56 8 64 14 64 24 C64 44 36 62 36 62Z"
+      fill="rgba(255,31,114,0.13)" stroke="#ff1f72" strokeWidth="2.5"/>
+    <g clipPath="url(#hclip)" opacity="0.45">
+      {[27,37,47].map(y => <line key={y} x1="8" y1={y} x2="64" y2={y} stroke="#ff1f72" strokeWidth="0.9"/>)}
+      {[23,36,49].map(x => <line key={x} x1={x} y1="8" x2={x} y2="62" stroke="#ff1f72" strokeWidth="0.9"/>)}
+    </g>
+    <g clipPath="url(#hclip)">
+      <rect x="23" y="27" width="13" height="10" rx="2.5" fill="#00906a"/>
+      <rect x="36" y="37" width="13" height="10" rx="2.5" fill="#00906a" opacity="0.85"/>
+      <rect x="10" y="37" width="13" height="10" rx="2.5" fill="#ff1f72" opacity="0.75"/>
+      <rect x="36" y="17" width="13" height="10" rx="2.5" fill="#e08800" opacity="0.85"/>
+    </g>
+  </svg>
+);
+
 /* ─── TOP PAARE ─── */
 function TopPaare({ st }) {
   const pd = useMemo(() =>
@@ -221,10 +244,12 @@ function Home({ st, onShowOnboarding, setPage }) {
   return (
     <div>
       {/* Header */}
-      <div style={{ textAlign: "center", padding: "16px 0 16px" }}>
-        <div style={{ fontSize: 44, lineHeight: 1, marginBottom: 10 }}>💕</div>
-        <h1 style={{ fontFamily: "'Playfair Display',serif", fontSize: 24, margin: "0 0 4px", background: GR3(C.pink, "#ff7700", C.gold), WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>Are You The One</h1>
-        <p style={{ color: C.mut, fontSize: 12, margin: "0 0 10px" }}>Staffel 6 · Tracker von Sabrina</p>
+      <div style={{ textAlign: "center", padding: "20px 0 18px" }}>
+        <div style={{ display: "flex", justifyContent: "center", marginBottom: 12 }}>
+          <AppIcon size={64} />
+        </div>
+        <h1 style={{ fontFamily: "'Playfair Display',serif", fontSize: 26, margin: "0 0 4px", background: GR3(C.pink, "#ff8800", C.gold), WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", fontWeight: 700 }}>Are You The One</h1>
+        <p style={{ color: C.mut, fontSize: 12, margin: "0 0 12px" }}>Staffel 6 · Tracker von Sabrina</p>
         <button onClick={onShowOnboarding} style={{ background: "none", border: `1px solid ${C.brd}`, borderRadius: 99, padding: "4px 12px", fontSize: 11, color: C.mut, cursor: "pointer", fontFamily: "inherit" }}>❓ Anleitung</button>
       </div>
 
@@ -1114,7 +1139,7 @@ function Daten({ st, setSt }) {
       {/* Impressum */}
       <div style={{ marginTop: 24, borderTop: `1px solid ${C.brd}`, paddingTop: 20 }}>
         <div style={{ textAlign: "center", marginBottom: 16 }}>
-          <div style={{ fontSize: 36, marginBottom: 8 }}>💕</div>
+          <div style={{ display: "flex", justifyContent: "center", marginBottom: 8 }}><AppIcon size={44} /></div>
           <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 18, background: GR3(C.pink, "#ff7700", C.gold), WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", fontWeight: 700 }}>Über diese App</div>
         </div>
         <Card sx={{ marginBottom: 10 }}>
@@ -1161,12 +1186,7 @@ const OB_STEPS = [
     desc: "Der Perfect Match Tracker hilft dir, während der Show mitzuraten – wer ist wessen Perfect Match? Alle 10 Frauen und 10 Männer der Staffel 6 sind bereits eingetragen.",
     hint: [["👩 10 Frauen", "#c8005a"], ["👨 10 Männer", "#0060b0"]],
   },
-  {
-    icon: "🔄",
-    title: "So läuft die Show ab",
-    desc: "Jede Folge hat denselben Ablauf – merke dir diese Reihenfolge für die App:",
-    hint: [["1. 📦 Matchbox", "#8a5c00"], ["2. 🌙 Matching Night", "#c8005a"], ["3. 📦 Matchbox", "#8a5c00"]],
-  },
+
   {
     icon: "📦",
     title: "Schritt 1: Matchbox",
@@ -1204,8 +1224,8 @@ function Onboarding({ onDone }) {
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 200, background: "rgba(245,242,251,0.98)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "24px 24px 40px" }}>
       {/* Progress bar */}
-      <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 4, background: "#ffe8ee" }}>
-        <div style={{ height: "100%", width: `${progress * 100}%`, background: GR3(C.pink, "#ff7700", C.gold), transition: "width 0.4s ease", borderRadius: "0 2px 2px 0" }} />
+      <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 5, background: "#ffe8ee" }}>
+        <div style={{ height: "100%", width: `${progress * 100}%`, background: GR3(C.pink, "#ff8800", C.gold), transition: "width 0.4s ease", borderRadius: "0 3px 3px 0" }} />
       </div>
 
       {/* Step counter */}
@@ -1213,7 +1233,9 @@ function Onboarding({ onDone }) {
 
       {/* Content */}
       <div style={{ maxWidth: 360, width: "100%", textAlign: "center" }}>
-        <div style={{ fontSize: 64, lineHeight: 1, marginBottom: 20 }}>{s.icon}</div>
+        <div style={{ display: "flex", justifyContent: "center", marginBottom: 20 }}>
+          {step === 0 ? <AppIcon size={72} /> : <div style={{ fontSize: 56, lineHeight: 1 }}>{s.icon}</div>}
+        </div>
         <h2 style={{ fontFamily: "'Playfair Display',serif", fontSize: 24, marginBottom: 14, color: C.txt, lineHeight: 1.2 }}>{s.title}</h2>
         <p style={{ fontSize: 15, color: C.mut, lineHeight: 1.7, marginBottom: s.hint ? 20 : 0 }}>{s.desc}</p>
 
@@ -1352,8 +1374,9 @@ export default function App() {
       {!st.onboardingDone && <Onboarding onDone={() => setSt(s => ({ ...s, onboardingDone: true }))} />}
       <style>{`@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&display=swap');*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}body{background:#f5f2fb}input,select,button{font-family:'DM Sans',sans-serif}input::placeholder{color:rgba(20,8,32,0.3)}select option{background:#fff;color:#140820}::-webkit-scrollbar{width:4px}::-webkit-scrollbar-thumb{background:rgba(200,0,90,0.3);border-radius:2px}`}</style>
       <div style={{ minHeight: "100vh", background: C.bg, color: C.txt, fontFamily: "'DM Sans',sans-serif", maxWidth: 520, margin: "0 auto" }}>
-        <div style={{ position: "sticky", top: 0, zIndex: 50, padding: "12px 18px", background: "rgba(255,248,245,0.97)", backdropFilter: "blur(20px)", borderBottom: `1px solid ${C.brd}`, boxShadow: "0 1px 8px rgba(0,0,0,0.06)" }}>
-          <span style={{ fontFamily: "'Playfair Display',serif", fontSize: 18, background: GR(C.pink, C.gold), WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", fontWeight: 700 }}>💕 Perfect Match Tracker</span>
+        <div style={{ position: "sticky", top: 0, zIndex: 50, padding: "10px 16px", background: "rgba(255,248,245,0.97)", backdropFilter: "blur(20px)", borderBottom: `1px solid ${C.brd}`, boxShadow: "0 1px 8px rgba(0,0,0,0.06)", display: "flex", alignItems: "center", gap: 10 }}>
+          <AppIcon size={28} />
+          <span style={{ fontFamily: "'Playfair Display',serif", fontSize: 18, background: GR3(C.pink, "#ff8800", C.gold), WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", fontWeight: 700, lineHeight: 1 }}>Are You The One</span>
         </div>
         <div style={{ padding: "16px 14px 100px" }}>{pages[page]}</div>
         <div style={{ position: "fixed", bottom: 0, left: "50%", transform: "translateX(-50%)", width: "100%", maxWidth: 520, background: "rgba(255,248,245,0.97)", backdropFilter: "blur(20px)", borderTop: `1px solid ${C.brd}`, display: "flex", padding: "7px 0 14px", boxShadow: "0 -2px 12px rgba(0,0,0,0.06)" }}>

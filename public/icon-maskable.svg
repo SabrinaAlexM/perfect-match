@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="0" fill="#ff1f72"/>
+  <defs>
+    <clipPath id="hc2">
+      <path d="M256 400 C256 400 116 316 116 216 C116 152 160 108 208 108 C232 108 252 120 256 136 C260 120 280 108 304 108 C352 108 396 152 396 216 C396 316 256 400 256 400Z"/>
+    </clipPath>
+  </defs>
+  <path d="M256 400 C256 400 116 316 116 216 C116 152 160 108 208 108 C232 108 252 120 256 136 C260 120 280 108 304 108 C352 108 396 152 396 216 C396 316 256 400 256 400Z"
+    fill="rgba(255,255,255,0.18)" stroke="white" stroke-width="10"/>
+  <g clip-path="url(#hc2)" opacity="0.4">
+    <line x1="116" y1="230" x2="396" y2="230" stroke="white" stroke-width="5"/>
+    <line x1="116" y1="280" x2="396" y2="280" stroke="white" stroke-width="5"/>
+    <line x1="116" y1="330" x2="396" y2="330" stroke="white" stroke-width="5"/>
+    <line x1="200" y1="108" x2="200" y2="400" stroke="white" stroke-width="5"/>
+    <line x1="256" y1="108" x2="256" y2="400" stroke="white" stroke-width="5"/>
+    <line x1="312" y1="108" x2="312" y2="400" stroke="white" stroke-width="5"/>
+  </g>
+  <g clip-path="url(#hc2)">
+    <rect x="200" y="230" width="56" height="50" rx="10" fill="white" opacity="0.95"/>
+    <rect x="256" y="280" width="56" height="50" rx="10" fill="white" opacity="0.85"/>
+    <rect x="144" y="280" width="56" height="50" rx="10" fill="white" opacity="0.75"/>
+    <rect x="256" y="180" width="56" height="50" rx="10" fill="white" opacity="0.9"/>
+  </g>
+</svg>
