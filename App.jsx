@@ -32,113 +32,241 @@ function ryserPerm(M) {
 }
 
 /* ─── WAHRSCHEINLICHKEIT (mit Paarungen aus Matching Nights) ─── */
-function calcProbs(frauen, maenner, matchboxen, matchingNights, extraConf = []) {
+function calcProbs(frauen, maenner, matchboxen, matchingNights, extraConf = [], doppelmatches = []) {
+  // ── Setup: active participants ──
   const allConf = [...matchboxen.filter(m => m.ergebnis === "match"), ...extraConf];
   const cF = new Set(allConf.map(m => m.frauId));
   const cM = new Set(allConf.map(m => m.mannId));
+  doppelmatches.forEach(d => { if (d.gender === "frau") cF.add(d.personId); else cM.add(d.personId); });
+
   const excl = new Set(matchboxen.filter(m => m.ergebnis === "kein_match").map(m => `${m.frauId}|${m.mannId}`));
+  const confirmedCount = allConf.length;
+
+  // Licht=0-Nights → alle Paarungen dieser Night ausschliessen
+  (matchingNights || []).forEach(night => {
+    if ((night.lichter - confirmedCount) <= 0) {
+      (night.paarungen || []).forEach(p => {
+        if (!cF.has(p.frauId) && !cM.has(p.mannId)) excl.add(`${p.frauId}|${p.mannId}`);
+      });
+    }
+  });
+
   const aF = frauen.filter(f => !cF.has(f.id));
   const aM = maenner.filter(m => !cM.has(m.id));
   const nF = aF.length, nM = aM.length, n = Math.max(nF, nM);
   if (!n) return { probs: {}, aF, aM, confirmed: allConf, impossible: false };
 
-  // Bestätigte Matches (M) als Grundlage für Licht-Auswertung
-  const confirmedCount = allConf.length;
+  // ── Night constraints: exact pair count per night ──
+  const constraints = (matchingNights || [])
+    .map(night => {
+      const needed = Math.max(0, night.lichter - confirmedCount);
+      // Only nights with positive lichter and actual active pairings matter
+      const activePairs = (night.paarungen || [])
+        .map(p => {
+          const fi = aF.findIndex(f => f.id === p.frauId);
+          const mi = aM.findIndex(m => m.id === p.mannId);
+          return (fi >= 0 && mi >= 0) ? fi * 100 + mi : -1;
+        })
+        .filter(x => x >= 0);
+      if (activePairs.length === 0) return null;
+      return { needed, pairs: new Set(activePairs), total: activePairs.length };
+    })
+    .filter(Boolean);
 
-  // Paaring-Häufigkeit UND Licht-basierte Ausschlüsse
-  const pairCounts = {};
-  (matchingNights || []).forEach(night => {
-    // korrekte unbestätigte Paare = Lichter - bestätigte Matches
-    const correctUnconfirmed = night.lichter - confirmedCount;
-    (night.paarungen || []).forEach(p => {
-      const k = `${p.frauId}|${p.mannId}`;
-      pairCounts[k] = (pairCounts[k] || 0) + 1;
-      // Wenn keine unbestätigten korrekten Paare → alle aktiven Paarungen dieser Night ausschließen
-      if (correctUnconfirmed <= 0 && !cF.has(p.frauId) && !cM.has(p.mannId)) {
-        excl.add(k);
+  // ── Backtracking with constraint propagation ──
+  const pairHits = {}; // "fi|mi" → count of valid assignments where this pair appears
+  let total = 0;
+  const colUsed = new Array(n).fill(false);
+  const assign = new Array(n).fill(-1);
+  const nightCounts = new Array(constraints.length).fill(0);
+
+  function bt(row) {
+    if (row === n) {
+      // Verify all night constraints exactly
+      for (let t = 0; t < constraints.length; t++) {
+        if (nightCounts[t] !== constraints[t].needed) return;
       }
-    });
-  });
-
-  const build = (si = -1, sj = -1) => {
-    const mat = [];
-    for (let i = 0; i < n; i++) {
-      if (i === si) continue;
-      const row = [];
-      for (let j = 0; j < n; j++) {
-        if (j === sj) continue;
-        if (i < nF && j < nM) {
-          const key = `${aF[i].id}|${aM[j].id}`;
-          if (excl.has(key)) { row.push(0); continue; }
-          // Gewicht: 1 + Anzahl gemeinsamer Nights (je öfter zusammen, desto höher)
-          row.push(1 + (pairCounts[key] || 0));
-        } else {
-          row.push(1);
+      total++;
+      for (let i = 0; i < nF; i++) {
+        if (assign[i] < nM) {
+          const k = `${i}|${assign[i]}`;
+          pairHits[k] = (pairHits[k] || 0) + 1;
         }
       }
-      mat.push(row);
+      return;
     }
-    return mat;
-  };
 
-  const tot = ryserPerm(build());
-  if (tot <= 0) return { probs: {}, aF, aM, confirmed: allConf, impossible: true };
-  const probs = {};
-  for (let i = 0; i < nF; i++) for (let j = 0; j < nM; j++) {
-    const key = `${aF[i].id}|${aM[j].id}`;
-    probs[key] = excl.has(key) ? 0 : Math.min(100, Math.max(0, Math.round(ryserPerm(build(i, j)) / tot * 100)));
+    for (let col = 0; col < n; col++) {
+      if (colUsed[col]) continue;
+      // Real pair: check exclusions
+      if (row < nF && col < nM && excl.has(`${aF[row].id}|${aM[col].id}`)) continue;
+
+      // Update night counts
+      const delta = [];
+      let feasible = true;
+      const encKey = row * 100 + col;
+
+      for (let t = 0; t < constraints.length; t++) {
+        const hit = (row < nF && col < nM && constraints[t].pairs.has(encKey)) ? 1 : 0;
+        const newCount = nightCounts[t] + hit;
+        const remaining = n - row - 1;
+        const needed = constraints[t].needed - newCount;
+
+        // Prune: can't get enough correct pairs or already too many
+        if (needed < 0 || needed > remaining) { feasible = false; break; }
+
+        // Additional pruning: max possible hits in remaining rows
+        // (conservative: assume all remaining active pairs in this night hit)
+        delta.push(hit);
+      }
+
+      if (!feasible) continue;
+
+      // Apply delta
+      for (let t = 0; t < constraints.length; t++) nightCounts[t] += delta[t];
+      colUsed[col] = true;
+      assign[row] = col;
+
+      bt(row + 1);
+
+      // Rollback
+      for (let t = 0; t < constraints.length; t++) nightCounts[t] -= delta[t];
+      colUsed[col] = false;
+      assign[row] = -1;
+    }
   }
+
+  bt(0);
+
+  if (total === 0) return { probs: {}, aF, aM, confirmed: allConf, impossible: true };
+
+  const probs = {};
+  for (let i = 0; i < nF; i++) {
+    for (let j = 0; j < nM; j++) {
+      const key = `${aF[i].id}|${aM[j].id}`;
+      const k = `${i}|${j}`;
+      probs[key] = Math.round((pairHits[k] || 0) / total * 100);
+    }
+  }
+
   return { probs, aF, aM, confirmed: allConf, impossible: false };
 }
 
 const uid = () => Math.random().toString(36).slice(2, 9);
 const firstName = name => name.split(" ")[0].slice(0, 6);
 
-/* ─── LIGHT THEME ─── */
+/* ─── DESIGN SYSTEM ─── */
 const C = {
-  bg: "#fff8f5", surf: "#ffffff", brd: "rgba(220,60,80,0.12)",
-  pink: "#ff1f72", pinkD: "rgba(255,31,114,0.09)",
-  gold: "#e08800", goldD: "rgba(224,136,0,0.10)",
-  blue: "#0066cc", blueD: "rgba(0,102,204,0.09)",
-  green: "#00906a", greenD: "rgba(0,144,106,0.09)",
-  red: "#d4001e", redD: "rgba(212,0,30,0.09)",
-  purple: "#7a00cc", purpleD: "rgba(122,0,204,0.09)",
-  coral: "#ff5c2e", coralD: "rgba(255,92,46,0.09)",
-  txt: "#1a0810", mut: "rgba(26,8,16,0.50)",
+  bg: "#fdf4f7",
+  surf: "#ffffff",
+  brd: "rgba(255,31,114,0.10)",
+  pink: "#ff1f72", pinkD: "rgba(255,31,114,0.08)", pinkGlow: "rgba(255,31,114,0.25)",
+  gold: "#f59e0b", goldD: "rgba(245,158,11,0.10)",
+  blue: "#3b82f6", blueD: "rgba(59,130,246,0.09)",
+  green: "#10b981", greenD: "rgba(16,185,129,0.09)",
+  red: "#ef4444", redD: "rgba(239,68,68,0.09)",
+  purple: "#8b5cf6", purpleD: "rgba(139,92,246,0.09)",
+  coral: "#f97316", coralD: "rgba(249,115,22,0.09)",
+  txt: "#0f0010", mut: "rgba(15,0,16,0.45)",
+  // Glassmorphism
+  glass: "rgba(255,255,255,0.72)",
+  glassBrd: "rgba(255,255,255,0.9)",
 };
 const GR = (a, b) => `linear-gradient(135deg,${a},${b})`;
 const GR3 = (a, b, c) => `linear-gradient(135deg,${a},${b},${c})`;
+const MESH = `radial-gradient(ellipse at 20% 20%, rgba(255,31,114,0.12) 0%, transparent 50%),
+  radial-gradient(ellipse at 80% 80%, rgba(245,158,11,0.10) 0%, transparent 50%),
+  radial-gradient(ellipse at 60% 10%, rgba(139,92,246,0.08) 0%, transparent 40%),
+  #fdf4f7`;
+const shadow = (col, str = 0.2) => `0 4px 24px rgba(0,0,0,0.06), 0 0 0 1px ${col}22, 0 8px 32px ${col}${Math.round(str*255).toString(16).padStart(2,'0')}`;
 
 /* ─── PRIMITIVES ─── */
-const Card = ({ children, acc, sx = {} }) => (
-  <div style={{ background: C.surf, border: `1px solid ${acc || C.brd}`, borderRadius: 16, padding: 18, boxShadow: "0 1px 6px rgba(0,0,0,0.06)", ...sx }}>{children}</div>
+const Card = ({ children, acc, sx = {}, glow }) => (
+  <div style={{
+    background: C.surf,
+    border: `1px solid ${acc || C.brd}`,
+    borderRadius: 20,
+    padding: 20,
+    boxShadow: glow ? shadow(glow, 0.22) : "0 2px 16px rgba(0,0,0,0.06), 0 0 0 1px rgba(255,31,114,0.06)",
+    backdropFilter: "blur(12px)",
+    ...sx
+  }}>{children}</div>
 );
-const Pill = ({ children, col }) => (
-  <span style={{ display: "inline-flex", alignItems: "center", padding: "3px 10px", borderRadius: 99, fontSize: 12, fontWeight: 700, background: `${col}18`, color: col, border: `1px solid ${col}44` }}>{children}</span>
+const GlassCard = ({ children, sx = {} }) => (
+  <div style={{
+    background: C.glass,
+    border: `1px solid ${C.glassBrd}`,
+    borderRadius: 20,
+    padding: 20,
+    boxShadow: "0 8px 32px rgba(0,0,0,0.08), inset 0 1px 0 rgba(255,255,255,0.9)",
+    backdropFilter: "blur(20px)",
+    ...sx
+  }}>{children}</div>
+);
+const Pill = ({ children, col, solid }) => (
+  <span style={{
+    display: "inline-flex", alignItems: "center",
+    padding: "4px 12px", borderRadius: 99, fontSize: 11, fontWeight: 700, letterSpacing: "0.02em",
+    background: solid ? col : `${col}15`,
+    color: solid ? "#fff" : col,
+    border: `1px solid ${col}${solid ? "00" : "40"}`,
+    boxShadow: solid ? `0 2px 8px ${col}44` : "none",
+  }}>{children}</span>
 );
 const Btn = ({ children, onClick, v = "pri", sm, dis, full, sx = {} }) => {
   const vs = {
-    pri: { background: GR(C.pink, "#cc0040"), color: "#fff", border: "none", boxShadow: "0 3px 12px rgba(255,31,114,0.30)" },
-    ghost: { background: "#fff2ee", color: C.txt, border: `1px solid ${C.brd}` },
-    gold: { background: GR(C.gold, "#5a3c00"), color: "#fff", border: "none" },
-    danger: { background: C.redD, color: C.red, border: `1px solid ${C.red}44` },
-    purple: { background: GR(C.purple, "#440088"), color: "#fff", border: "none" },
+    pri: { background: GR3(C.pink, "#e8005a", "#c0003a"), color: "#fff", border: "none", boxShadow: `0 4px 16px ${C.pinkGlow}, 0 1px 0 rgba(255,255,255,0.2) inset` },
+    ghost: { background: "rgba(255,255,255,0.8)", color: C.txt, border: `1px solid rgba(255,31,114,0.15)`, boxShadow: "0 1px 4px rgba(0,0,0,0.06)" },
+    gold: { background: GR3(C.gold, "#d97706", "#b45309"), color: "#fff", border: "none", boxShadow: "0 4px 16px rgba(245,158,11,0.35)" },
+    danger: { background: C.redD, color: C.red, border: `1px solid ${C.red}33` },
+    purple: { background: GR3(C.purple, "#7c3aed", "#6d28d9"), color: "#fff", border: "none", boxShadow: "0 4px 16px rgba(139,92,246,0.35)" },
   };
-  return <button onClick={onClick} disabled={dis} style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6, padding: sm ? "6px 14px" : "10px 20px", borderRadius: 11, cursor: dis ? "not-allowed" : "pointer", fontFamily: "inherit", fontSize: sm ? 13 : 14, fontWeight: 600, opacity: dis ? 0.35 : 1, width: full ? "100%" : "auto", ...vs[v], ...sx }}>{children}</button>;
+  return <button onClick={onClick} disabled={dis} style={{
+    display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6,
+    padding: sm ? "7px 16px" : "12px 22px",
+    borderRadius: 14, cursor: dis ? "not-allowed" : "pointer",
+    fontFamily: "inherit", fontSize: sm ? 13 : 14, fontWeight: 700,
+    opacity: dis ? 0.35 : 1, width: full ? "100%" : "auto",
+    letterSpacing: "0.01em", transition: "transform 0.1s, box-shadow 0.1s",
+    ...vs[v], ...sx
+  }}>{children}</button>;
 };
+const inputStyle = { width: "100%", boxSizing: "border-box", background: "rgba(255,255,255,0.9)", border: `1.5px solid rgba(255,31,114,0.12)`, borderRadius: 12, padding: "11px 14px", color: C.txt, fontFamily: "inherit", fontSize: 14, outline: "none", boxShadow: "0 1px 4px rgba(0,0,0,0.04) inset" };
 const Inp = ({ val, set, ph, tp = "text", sx = {} }) => (
-  <input value={val} type={tp} onChange={e => set(e.target.value)} placeholder={ph}
-    style={{ width: "100%", boxSizing: "border-box", background: "#fff8f6", border: `1px solid ${C.brd}`, borderRadius: 10, padding: "10px 14px", color: C.txt, fontFamily: "inherit", fontSize: 14, outline: "none", ...sx }} />
+  <input value={val} type={tp} onChange={e => set(e.target.value)} placeholder={ph} style={{ ...inputStyle, ...sx }} />
 );
 const Sel = ({ val, set, dis, children }) => (
   <select value={val} onChange={e => set(e.target.value)} disabled={dis}
-    style={{ width: "100%", boxSizing: "border-box", background: "#fff8f6", border: `1px solid ${C.brd}`, borderRadius: 10, padding: "10px 14px", color: val ? C.txt : C.mut, fontFamily: "inherit", fontSize: 14, outline: "none", cursor: dis ? "not-allowed" : "pointer", opacity: dis ? 0.45 : 1 }}>{children}</select>
+    style={{ ...inputStyle, color: val ? C.txt : C.mut, cursor: dis ? "not-allowed" : "pointer", opacity: dis ? 0.45 : 1 }}>{children}</select>
 );
 const Field = ({ label, children }) => (
-  <div style={{ marginBottom: 14 }}>
-    {label && <label style={{ display: "block", fontSize: 11, color: C.mut, marginBottom: 6, fontWeight: 700, letterSpacing: "0.06em" }}>{label.toUpperCase()}</label>}
+  <div style={{ marginBottom: 16 }}>
+    {label && <label style={{ display: "block", fontSize: 11, color: C.mut, marginBottom: 6, fontWeight: 800, letterSpacing: "0.08em" }}>{label.toUpperCase()}</label>}
     {children}
   </div>
+);
+
+/* ─── APP ICON (Herz + Kreuztabelle) ─── */
+const AppIcon = ({ size = 32 }) => (
+  <svg width={size} height={size} viewBox="0 0 72 72" style={{ display: "block", flexShrink: 0 }}>
+    <defs>
+      <clipPath id="hclip">
+        <path d="M36 62 C36 62 8 44 8 24 C8 14 16 8 24 8 C29 8 33.5 10.5 36 14.5 C38.5 10.5 43 8 48 8 C56 8 64 14 64 24 C64 44 36 62 36 62Z"/>
+      </clipPath>
+    </defs>
+    <path d="M36 62 C36 62 8 44 8 24 C8 14 16 8 24 8 C29 8 33.5 10.5 36 14.5 C38.5 10.5 43 8 48 8 C56 8 64 14 64 24 C64 44 36 62 36 62Z"
+      fill="rgba(255,31,114,0.13)" stroke="#ff1f72" strokeWidth="2.5"/>
+    <g clipPath="url(#hclip)" opacity="0.45">
+      {[27,37,47].map(y => <line key={y} x1="8" y1={y} x2="64" y2={y} stroke="#ff1f72" strokeWidth="0.9"/>)}
+      {[23,36,49].map(x => <line key={x} x1={x} y1="8" x2={x} y2="62" stroke="#ff1f72" strokeWidth="0.9"/>)}
+    </g>
+    <g clipPath="url(#hclip)">
+      <rect x="23" y="27" width="13" height="10" rx="2.5" fill="#00906a"/>
+      <rect x="36" y="37" width="13" height="10" rx="2.5" fill="#00906a" opacity="0.85"/>
+      <rect x="10" y="37" width="13" height="10" rx="2.5" fill="#ff1f72" opacity="0.75"/>
+      <rect x="36" y="17" width="13" height="10" rx="2.5" fill="#e08800" opacity="0.85"/>
+    </g>
+  </svg>
 );
 
 /* ─── TOP PAARE ─── */
@@ -221,10 +349,12 @@ function Home({ st, onShowOnboarding, setPage }) {
   return (
     <div>
       {/* Header */}
-      <div style={{ textAlign: "center", padding: "16px 0 16px" }}>
-        <div style={{ fontSize: 44, lineHeight: 1, marginBottom: 10 }}>💕</div>
-        <h1 style={{ fontFamily: "'Playfair Display',serif", fontSize: 24, margin: "0 0 4px", background: GR3(C.pink, "#ff7700", C.gold), WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>Are You The One</h1>
-        <p style={{ color: C.mut, fontSize: 12, margin: "0 0 10px" }}>Staffel 6 · Tracker von Sabrina</p>
+      <div style={{ textAlign: "center", padding: "20px 0 18px" }}>
+        <div style={{ display: "flex", justifyContent: "center", marginBottom: 12 }}>
+          <AppIcon size={64} />
+        </div>
+        <h1 style={{ fontFamily: "'Playfair Display',serif", fontSize: 26, margin: "0 0 4px", background: GR3(C.pink, "#ff8800", C.gold), WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", fontWeight: 700 }}>Are You The One</h1>
+        <p style={{ color: C.mut, fontSize: 12, margin: "0 0 12px" }}>Staffel 6 · Tracker von Sabrina</p>
         <button onClick={onShowOnboarding} style={{ background: "none", border: `1px solid ${C.brd}`, borderRadius: 99, padding: "4px 12px", fontSize: 11, color: C.mut, cursor: "pointer", fontFamily: "inherit" }}>❓ Anleitung</button>
       </div>
 
@@ -509,16 +639,24 @@ function MatchingNights({ st, setSt }) {
 function Matchboxen({ st, setSt }) {
   const [open, setOpen] = useState(false);
   const [fId, setFId] = useState(""); const [mId, setMId] = useState(""); const [erg, setErg] = useState("");
+  const [dmId, setDmId] = useState(""); const [dmGender, setDmGender] = useState("");
   const conf = st.matchboxen.filter(m => m.ergebnis === "match");
-  const cF = new Set(conf.map(m => m.frauId)); const cM = new Set(conf.map(m => m.mannId));
+  const dmExits = st.doppelmatches || [];
+  const cF = new Set([...conf.map(m => m.frauId), ...dmExits.filter(d => d.gender === "frau").map(d => d.personId)]);
+  const cM = new Set([...conf.map(m => m.mannId), ...dmExits.filter(d => d.gender === "mann").map(d => d.personId)]);
   const aF = st.teilnehmer.frauen.filter(f => !cF.has(f.id));
   const aM = st.teilnehmer.maenner.filter(m => !cM.has(m.id));
   const sold = new Set(st.matchboxen.filter(m => m.ergebnis === "verkauft").map(m => `${m.frauId}|${m.mannId}`));
   const availM = aM.filter(m => !sold.has(`${fId}|${m.id}`));
+  // Für Doppelmatch: alle aktiven Personen ausser den gerade gewählten
+  const dmCandidatesFrauen = st.teilnehmer.frauen.filter(f => !cF.has(f.id) && f.id !== fId);
+  const dmCandidatesMaenner = st.teilnehmer.maenner.filter(m => !cM.has(m.id) && m.id !== mId);
   const save = () => {
     if (!fId || !mId || !erg) return;
-    setSt(s => ({ ...s, matchboxen: [...s.matchboxen, { id: uid(), nummer: s.matchboxen.length + 1, frauId: fId, mannId: mId, ergebnis: erg }] }));
-    setOpen(false); setFId(""); setMId(""); setErg("");
+    const newMb = { id: uid(), nummer: st.matchboxen.length + 1, frauId: fId, mannId: mId, ergebnis: erg };
+    const newDm = (erg === "match" && dmId && dmGender) ? [...(st.doppelmatches || []), { id: uid(), personId: dmId, gender: dmGender, matchboxId: newMb.id }] : (st.doppelmatches || []);
+    setSt(s => ({ ...s, matchboxen: [...s.matchboxen, newMb], doppelmatches: newDm }));
+    setOpen(false); setFId(""); setMId(""); setErg(""); setDmId(""); setDmGender("");
   };
   const rm = id => setSt(s => ({ ...s, matchboxen: s.matchboxen.filter(m => m.id !== id).map((m, i) => ({ ...m, nummer: i + 1 })) }));
   const EC = { match: { lbl: "💚 Match!", col: C.green }, kein_match: { lbl: "❌ Kein Match", col: C.red }, verkauft: { lbl: "💰 Verkauft", col: C.gold } };
@@ -541,6 +679,12 @@ function Matchboxen({ st, setSt }) {
           </div>
           {mb.ergebnis === "verkauft" && <div style={{ marginTop: 8, fontSize: 12, color: C.gold }}>⚠️ Dieses Paar kann nie wieder in eine Matchbox.</div>}
           {mb.ergebnis === "match" && <div style={{ marginTop: 8, fontSize: 12, color: C.green }}>✅ Ausgezogen – leuchten weiterhin als Licht.</div>}
+          {mb.ergebnis === "match" && (() => {
+            const dm = (st.doppelmatches || []).find(d => d.matchboxId === mb.id);
+            if (!dm) return null;
+            const p = dm.gender === "frau" ? st.teilnehmer.frauen.find(x => x.id === dm.personId) : st.teilnehmer.maenner.find(x => x.id === dm.personId);
+            return <div style={{ marginTop: 4, fontSize: 12, color: C.pink }}>💔 Doppelmatch: {p?.name} ausgezogen</div>;
+          })()}
         </Card>;
       })}
       {!open ? (
@@ -566,9 +710,38 @@ function Matchboxen({ st, setSt }) {
               ))}
             </div>
           </Field>
+          {/* Doppelmatch */}
+          {erg === "match" && (
+            <div style={{ marginBottom: 14, padding: "12px 14px", background: "#fff0f5", borderRadius: 12, border: `1px solid ${C.pink}33` }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: C.pink, marginBottom: 8 }}>💔 Doppelmatch?</div>
+              <div style={{ fontSize: 12, color: C.mut, marginBottom: 10 }}>
+                War eine weitere Person in dieses Match involviert? Diese Person zieht dann ebenfalls aus – ohne bestätigtes Match.
+              </div>
+              <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+                {[{ v: "", lbl: "Kein Doppelmatch" }, { v: "frau", lbl: "👩 Frau" }, { v: "mann", lbl: "👨 Mann" }].map(opt => (
+                  <button key={opt.v} onClick={() => { setDmGender(opt.v); setDmId(""); }}
+                    style={{ flex: 1, padding: "7px 4px", borderRadius: 8, cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 600, border: `2px solid ${dmGender === opt.v ? C.pink : C.brd}`, background: dmGender === opt.v ? C.pinkD : "#fff", color: dmGender === opt.v ? C.pink : C.mut }}>
+                    {opt.lbl}
+                  </button>
+                ))}
+              </div>
+              {dmGender === "frau" && (
+                <Sel val={dmId} set={setDmId}>
+                  <option value="">– Frau wählen –</option>
+                  {dmCandidatesFrauen.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
+                </Sel>
+              )}
+              {dmGender === "mann" && (
+                <Sel val={dmId} set={setDmId}>
+                  <option value="">– Mann wählen –</option>
+                  {dmCandidatesMaenner.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+                </Sel>
+              )}
+            </div>
+          )}
           <div style={{ display: "flex", gap: 8 }}>
             <Btn onClick={save} dis={!fId || !mId || !erg} v="gold">Speichern</Btn>
-            <Btn onClick={() => { setOpen(false); setFId(""); setMId(""); setErg(""); }} v="ghost">Abbrechen</Btn>
+            <Btn onClick={() => { setOpen(false); setFId(""); setMId(""); setErg(""); setDmId(""); setDmGender(""); }} v="ghost">Abbrechen</Btn>
           </div>
         </Card>
       )}
@@ -669,25 +842,28 @@ function Kreuztabelle({ frauen, maenner, pairCounts, mbStatus, annahmen = [], ni
 }
 
 /* ─── PROBABILITY BARS ─── */
-function ProbBars({ probs, cps, sel, gender, confirmed, cF, cM, teilnehmer, matchboxen, matchingNights }) {
+function ProbBars({ probs, prevProbs, cps, sel, gender, confirmed, cF, cM, teilnehmer, matchboxen, matchingNights }) {
   const isCon = sel && (gender === "frauen" ? cF.has(sel) : cM.has(sel));
   const selMatch = confirmed?.find(m => gender === "frauen" ? m.frauId === sel : m.mannId === sel);
   const selPart = selMatch && (gender === "frauen"
     ? teilnehmer.maenner.find(m => m.id === selMatch.mannId)
     : teilnehmer.frauen.find(f => f.id === selMatch.frauId));
-  const pc = p => p === 0 ? "#a00018" : p >= 60 ? "#005c38" : p >= 30 ? "#7a5000" : C.mut;
-  const pb = p => p === 0 ? "#ffc8cc" : p >= 60 ? "#d4f5e8" : p >= 30 ? "#fff0cc" : "#f8f6ff";
 
-  const getReason = (fId, mId) => {
-    const key = gender === "frauen" ? `${fId}|${mId}` : `${mId}|${fId}`;
-    const normKey = gender === "frauen" ? `${sel}|${(cps.find(c=>c.id===mId)||cps.find(c=>c.id===fId))?.id}` : `${(cps.find(c=>c.id===fId)||cps.find(c=>c.id===mId))?.id}|${sel}`;
-    const realKey = gender === "frauen" ? `${sel}|${mId}` : `${fId}|${sel}`;
-    const keinMatch = (matchboxen||[]).some(mb => mb.ergebnis === "kein_match" && mb.frauId === (gender==="frauen"?sel:mId||fId) && mb.mannId === (gender==="frauen"?mId||fId:sel));
-    if (keinMatch) return { txt: "Kein Match bestätigt (Matchbox)", col: "#a00018" };
-    const cnt = (matchingNights||[]).filter(n => (n.paarungen||[]).some(p => p.frauId === (gender==="frauen"?sel:mId) && p.mannId === (gender==="frauen"?mId:sel))).length;
-    if (cnt >= 3) return { txt: `${cnt}× zusammengestanden – starkes Signal`, col: "#005c38" };
-    if (cnt >= 1) return { txt: `${cnt}× in Matching Night zusammen`, col: "#7a5000" };
-    return null;
+  const getKey = (cpId) => gender === "frauen" ? `${sel}|${cpId}` : `${cpId}|${sel}`;
+
+  const getInfo = (cp) => {
+    const fId = gender === "frauen" ? sel : cp.id;
+    const mId = gender === "frauen" ? cp.id : sel;
+    const p = probs?.[getKey(cp.id)] ?? 0;
+    const prev = prevProbs?.[getKey(cp.id)];
+    const delta = prev != null ? p - prev : null;
+    const cnt = (matchingNights||[]).filter(n => (n.paarungen||[]).some(pa => pa.frauId === fId && pa.mannId === mId)).length;
+    const neverTogether = cnt === 0 && p > 0;
+    const keinMatch = (matchboxen||[]).some(mb => mb.ergebnis === "kein_match" && mb.frauId === fId && mb.mannId === mId);
+    const onlyOption = p >= 75;
+    const lastNights = (matchingNights||[]).slice(-3);
+    const streak = lastNights.length >= 2 && lastNights.every(n => (n.paarungen||[]).some(pa => pa.frauId === fId && pa.mannId === mId));
+    return { p, delta, cnt, neverTogether, keinMatch, onlyOption, streak };
   };
 
   if (isCon) return (
@@ -697,26 +873,64 @@ function ProbBars({ probs, cps, sel, gender, confirmed, cF, cM, teilnehmer, matc
     </div>
   );
   if (!cps?.length) return <div style={{ color: C.mut, fontSize: 14 }}>Keine aktiven Gegenüber vorhanden.</div>;
+
+  const sorted = [...cps].sort((a, b) => (probs?.[getKey(b.id)] ?? 0) - (probs?.[getKey(a.id)] ?? 0));
+
+  // Group into categories
+  const hot = sorted.filter(cp => (probs?.[getKey(cp.id)] ?? 0) >= 50);
+  const maybe = sorted.filter(cp => { const p = probs?.[getKey(cp.id)] ?? 0; return p > 0 && p < 50; });
+  const out = sorted.filter(cp => (probs?.[getKey(cp.id)] ?? 0) === 0);
+
+  const PairRow = ({ cp }) => {
+    const { p, delta, cnt, neverTogether, keinMatch, onlyOption, streak } = getInfo(cp);
+    const col = keinMatch ? "#a00018" : p >= 75 ? "#005c38" : p >= 40 ? "#7a5000" : C.mut;
+    const bg = keinMatch ? "#ffc8cc" : p >= 75 ? "#b8f0d8" : p >= 40 ? "#fff0cc" : "#f5f5f5";
+
+    return (
+      <div style={{ marginBottom: 8, padding: "11px 14px", borderRadius: 14, background: bg, border: `1.5px solid ${col}33`, position: "relative" }}>
+        {/* AHA badges */}
+        <div style={{ display: "flex", gap: 4, marginBottom: 6, flexWrap: "wrap" }}>
+          {onlyOption && !keinMatch && <span style={{ fontSize: 10, fontWeight: 800, padding: "2px 8px", borderRadius: 99, background: "#005c38", color: "#fff" }}>⚡ Fast sicher!</span>}
+          {streak && !keinMatch && <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 99, background: "#0060b0", color: "#fff" }}>🔥 {cnt}× in Folge!</span>}
+          {delta != null && Math.abs(delta) >= 10 && (
+            <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 99, background: delta > 0 ? "#005c38" : "#9a0018", color: "#fff" }}>
+              {delta > 0 ? `↑ +${delta}%` : `↓ ${delta}%`}
+            </span>
+          )}
+          {neverTogether && <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 99, background: "#f0f0f0", color: "#888" }}>Noch nie zusammen</span>}
+        </div>
+
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: p > 0 ? 6 : 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <span style={{ fontSize: 14, fontWeight: 700, color: C.txt }}>{gender === "frauen" ? "👨" : "👩"} {cp.name}</span>
+            {cnt > 0 && !streak && <span style={{ fontSize: 11, color: C.blue, background: C.blueD, padding: "1px 7px", borderRadius: 99, fontWeight: 600 }}>{cnt}×</span>}
+          </div>
+          <span style={{ color: col, fontWeight: 900, fontSize: 20, letterSpacing: "-0.5px" }}>{p}%</span>
+        </div>
+
+        {p > 0 && (
+          <div style={{ height: 7, borderRadius: 4, background: "rgba(0,0,0,0.10)" }}>
+            <div style={{ height: "100%", width: `${p}%`, background: `linear-gradient(90deg, ${col}, ${col}aa)`, borderRadius: 4, transition: "width 0.6s ease" }} />
+          </div>
+        )}
+        {keinMatch && <div style={{ fontSize: 11, color: "#a00018", fontWeight: 700, marginTop: 4 }}>❌ Kein Match (Matchbox)</div>}
+      </div>
+    );
+  };
+
+  const Section = ({ label, items, col }) => items.length === 0 ? null : (
+    <div style={{ marginBottom: 12 }}>
+      <div style={{ fontSize: 10, fontWeight: 800, color: col, letterSpacing: "0.08em", marginBottom: 6, textTransform: "uppercase" }}>{label}</div>
+      {items.map(cp => <PairRow key={cp.id} cp={cp} />)}
+    </div>
+  );
+
   return (
     <div>
-      {[...cps].sort((a, b) => {
-        const ka = gender === "frauen" ? `${sel}|${a.id}` : `${a.id}|${sel}`;
-        const kb = gender === "frauen" ? `${sel}|${b.id}` : `${b.id}|${sel}`;
-        return (probs?.[kb] ?? 0) - (probs?.[ka] ?? 0);
-      }).map(cp => {
-        const p = probs?.[gender === "frauen" ? `${sel}|${cp.id}` : `${cp.id}|${sel}`] ?? 0;
-        const reason = getReason(gender==="frauen"?sel:cp.id, gender==="frauen"?cp.id:sel);
-        return <div key={cp.id} style={{ marginBottom: 9, padding: "10px 12px", borderRadius: 12, background: pb(p), border: `1px solid ${pc(p)}33` }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 5 }}>
-            <span style={{ fontSize: 14, fontWeight: 600, color: C.txt }}>{gender === "frauen" ? "👨" : "👩"} {cp.name}</span>
-            <span style={{ color: pc(p), fontWeight: 800, fontSize: 17 }}>{p}%</span>
-          </div>
-          <div style={{ height: 6, borderRadius: 3, background: "rgba(0,0,0,0.08)", marginBottom: reason ? 5 : 0 }}>
-            <div style={{ height: "100%", width: `${p}%`, background: pc(p), borderRadius: 3, transition: "width 0.5s ease" }} />
-          </div>
-          {reason && <div style={{ fontSize: 11, color: reason.col, fontWeight: 600, marginTop: 3 }}>{reason.txt}</div>}
-        </div>;
-      })}
+      <Section label="🔥 Sehr wahrscheinlich" items={hot} col="#005c38" />
+      <Section label="🤔 Möglich" items={maybe} col="#7a5000" />
+      <Section label="❌ Ausgeschlossen" items={out} col="#a00018" />
+      {prevProbs && <div style={{ fontSize: 11, color: C.mut, marginTop: 4 }}>↑↓ Änderung seit letzter Matchbox</div>}
     </div>
   );
 }
@@ -831,7 +1045,7 @@ function Analyse({ st, setSt, pd }) {
               <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 16, marginBottom: 12 }}>
                 {gender === "frauen" ? "👩" : "👨"} {people.find(p => p.id === sel)?.name}
               </div>
-              <ProbBars probs={probs} cps={cps} sel={sel} gender={gender} confirmed={confirmed} cF={cF} cM={cM} teilnehmer={st.teilnehmer} matchboxen={st.matchboxen} matchingNights={st.matchingNights} />
+              <ProbBars probs={probs} prevProbs={pdPrev?.probs} cps={cps} sel={sel} gender={gender} confirmed={confirmed} cF={cF} cM={cM} teilnehmer={st.teilnehmer} matchboxen={st.matchboxen} matchingNights={st.matchingNights} />
               <div style={{ marginTop: 10, height: 1, background: C.brd }} />
               <div style={{ marginTop: 10, fontSize: 11, color: C.mut, lineHeight: 1.6 }}>
                 <strong style={{ color: C.txt }}>Berechnung:</strong> Matrizenpermanente (Ryser). Höhere Gewichte für Paare die öfter zusammenstanden. Bestätigte Nicht-Matches werden ausgeschlossen.
@@ -925,7 +1139,7 @@ function Analyse({ st, setSt, pd }) {
                   <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 15, marginBottom: 12, color: C.purple }}>
                     {expPeople.find(p => p.id === expSel)?.name} – Hypothetisch
                   </div>
-                  <ProbBars probs={pdExp.probs} cps={expCps} sel={expSel} gender={expGender} confirmed={pdExp.confirmed} cF={new Set(pdExp.confirmed.map(c => c.frauId))} cM={new Set(pdExp.confirmed.map(c => c.mannId))} teilnehmer={st.teilnehmer} matchboxen={st.matchboxen} matchingNights={st.matchingNights} />
+                  <ProbBars probs={pdExp.probs} prevProbs={null} cps={expCps} sel={expSel} gender={expGender} confirmed={pdExp.confirmed} cF={new Set(pdExp.confirmed.map(c => c.frauId))} cM={new Set(pdExp.confirmed.map(c => c.mannId))} teilnehmer={st.teilnehmer} matchboxen={st.matchboxen} matchingNights={st.matchingNights} />
                 </Card>
               )}
               {!expSel && <div style={{ textAlign: "center", color: C.mut, fontSize: 13, padding: "10px 0" }}>Person auswählen für hypothetische Wahrscheinlichkeiten 👆</div>}
@@ -1097,7 +1311,7 @@ function Daten({ st, setSt }) {
             </div>
             <div style={{ display: "flex", gap: 8 }}>
               <Btn v="danger" sx={{ flex: 1 }} onClick={() => {
-                const fresh = { ...INIT, onboardingDone: true, impressum: st.impressum };
+                const fresh = { ...INIT, onboardingDone: true, impressum: st.impressum, doppelmatches: [] };
                 try { localStorage.removeItem(LS_KEY); } catch {}
                 setSt(fresh);
                 setConfirmDel(false);
@@ -1114,7 +1328,7 @@ function Daten({ st, setSt }) {
       {/* Impressum */}
       <div style={{ marginTop: 24, borderTop: `1px solid ${C.brd}`, paddingTop: 20 }}>
         <div style={{ textAlign: "center", marginBottom: 16 }}>
-          <div style={{ fontSize: 36, marginBottom: 8 }}>💕</div>
+          <div style={{ display: "flex", justifyContent: "center", marginBottom: 8 }}><AppIcon size={44} /></div>
           <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 18, background: GR3(C.pink, "#ff7700", C.gold), WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", fontWeight: 700 }}>Über diese App</div>
         </div>
         <Card sx={{ marginBottom: 10 }}>
@@ -1161,12 +1375,7 @@ const OB_STEPS = [
     desc: "Der Perfect Match Tracker hilft dir, während der Show mitzuraten – wer ist wessen Perfect Match? Alle 10 Frauen und 10 Männer der Staffel 6 sind bereits eingetragen.",
     hint: [["👩 10 Frauen", "#c8005a"], ["👨 10 Männer", "#0060b0"]],
   },
-  {
-    icon: "🔄",
-    title: "So läuft die Show ab",
-    desc: "Jede Folge hat denselben Ablauf – merke dir diese Reihenfolge für die App:",
-    hint: [["1. 📦 Matchbox", "#8a5c00"], ["2. 🌙 Matching Night", "#c8005a"], ["3. 📦 Matchbox", "#8a5c00"]],
-  },
+
   {
     icon: "📦",
     title: "Schritt 1: Matchbox",
@@ -1204,8 +1413,8 @@ function Onboarding({ onDone }) {
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 200, background: "rgba(245,242,251,0.98)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "24px 24px 40px" }}>
       {/* Progress bar */}
-      <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 4, background: "#ffe8ee" }}>
-        <div style={{ height: "100%", width: `${progress * 100}%`, background: GR3(C.pink, "#ff7700", C.gold), transition: "width 0.4s ease", borderRadius: "0 2px 2px 0" }} />
+      <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 5, background: "#ffe8ee" }}>
+        <div style={{ height: "100%", width: `${progress * 100}%`, background: GR3(C.pink, "#ff8800", C.gold), transition: "width 0.4s ease", borderRadius: "0 3px 3px 0" }} />
       </div>
 
       {/* Step counter */}
@@ -1213,7 +1422,9 @@ function Onboarding({ onDone }) {
 
       {/* Content */}
       <div style={{ maxWidth: 360, width: "100%", textAlign: "center" }}>
-        <div style={{ fontSize: 64, lineHeight: 1, marginBottom: 20 }}>{s.icon}</div>
+        <div style={{ display: "flex", justifyContent: "center", marginBottom: 20 }}>
+          {step === 0 ? <AppIcon size={72} /> : <div style={{ fontSize: 56, lineHeight: 1 }}>{s.icon}</div>}
+        </div>
         <h2 style={{ fontFamily: "'Playfair Display',serif", fontSize: 24, marginBottom: 14, color: C.txt, lineHeight: 1.2 }}>{s.title}</h2>
         <p style={{ fontSize: 15, color: C.mut, lineHeight: 1.7, marginBottom: s.hint ? 20 : 0 }}>{s.desc}</p>
 
@@ -1325,6 +1536,7 @@ const INIT = {
   matchingNights: [],
   matchboxen: [],
   annahmen: [],
+  doppelmatches: [],
   onboardingDone: false,
   impressum: {},
 };
@@ -1339,7 +1551,7 @@ export default function App() {
   const [st, setSt] = useState(() => loadState(INIT));
   useEffect(() => { saveState(st); }, [st]);
   const [page, setPage] = useState("home");
-  const pd = useMemo(() => calcProbs(st.teilnehmer.frauen, st.teilnehmer.maenner, st.matchboxen, st.matchingNights), [st]);
+  const pd = useMemo(() => calcProbs(st.teilnehmer.frauen, st.teilnehmer.maenner, st.matchboxen, st.matchingNights, [], st.doppelmatches || []), [st]);
   const pages = {
     home: <Home st={st} onShowOnboarding={() => setSt(s => ({ ...s, onboardingDone: false }))} setPage={setPage} />,
     nights: <MatchingNights st={st} setSt={setSt} />,
@@ -1350,19 +1562,44 @@ export default function App() {
   return (
     <>
       {!st.onboardingDone && <Onboarding onDone={() => setSt(s => ({ ...s, onboardingDone: true }))} />}
-      <style>{`@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&display=swap');*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}body{background:#f5f2fb}input,select,button{font-family:'DM Sans',sans-serif}input::placeholder{color:rgba(20,8,32,0.3)}select option{background:#fff;color:#140820}::-webkit-scrollbar{width:4px}::-webkit-scrollbar-thumb{background:rgba(200,0,90,0.3);border-radius:2px}`}</style>
-      <div style={{ minHeight: "100vh", background: C.bg, color: C.txt, fontFamily: "'DM Sans',sans-serif", maxWidth: 520, margin: "0 auto" }}>
-        <div style={{ position: "sticky", top: 0, zIndex: 50, padding: "12px 18px", background: "rgba(255,248,245,0.97)", backdropFilter: "blur(20px)", borderBottom: `1px solid ${C.brd}`, boxShadow: "0 1px 8px rgba(0,0,0,0.06)" }}>
-          <span style={{ fontFamily: "'Playfair Display',serif", fontSize: 18, background: GR(C.pink, C.gold), WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", fontWeight: 700 }}>💕 Perfect Match Tracker</span>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        body { background: #fdf4f7; -webkit-font-smoothing: antialiased; }
+        input, select, button, textarea { font-family: 'Plus Jakarta Sans', sans-serif; }
+        input::placeholder { color: rgba(15,0,16,0.28); }
+        select option { background: #fff; color: #0f0010; }
+        ::-webkit-scrollbar { width: 3px; }
+        ::-webkit-scrollbar-thumb { background: rgba(255,31,114,0.25); border-radius: 2px; }
+        @keyframes fadeUp { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:translateY(0); } }
+        @keyframes pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(255,31,114,0.4); } 50% { box-shadow: 0 0 0 8px rgba(255,31,114,0); } }
+        @keyframes shimmer { 0% { background-position: -200% center; } 100% { background-position: 200% center; } }
+        .fade-up { animation: fadeUp 0.35s ease both; }
+      `}</style>
+      <div style={{ minHeight: "100vh", background: MESH, color: C.txt, fontFamily: "'Plus Jakarta Sans',sans-serif", maxWidth: 520, margin: "0 auto" }}>
+        {/* Sticky Header */}
+        <div style={{ position: "sticky", top: 0, zIndex: 50, padding: "12px 18px", background: "rgba(253,244,247,0.88)", backdropFilter: "blur(24px) saturate(180%)", borderBottom: `1px solid rgba(255,31,114,0.10)`, boxShadow: "0 1px 0 rgba(255,255,255,0.8), 0 4px 20px rgba(255,31,114,0.06)", display: "flex", alignItems: "center", gap: 10 }}>
+          <AppIcon size={30} />
+          <div style={{ flex: 1 }}>
+            <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 17, background: GR3(C.pink, "#f97316", C.gold), WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", fontWeight: 700, lineHeight: 1.1 }}>Are You The One</div>
+            <div style={{ fontSize: 10, color: C.mut, letterSpacing: "0.06em", fontWeight: 600 }}>STAFFEL 6</div>
+          </div>
         </div>
-        <div style={{ padding: "16px 14px 100px" }}>{pages[page]}</div>
-        <div style={{ position: "fixed", bottom: 0, left: "50%", transform: "translateX(-50%)", width: "100%", maxWidth: 520, background: "rgba(255,248,245,0.97)", backdropFilter: "blur(20px)", borderTop: `1px solid ${C.brd}`, display: "flex", padding: "7px 0 14px", boxShadow: "0 -2px 12px rgba(0,0,0,0.06)" }}>
+
+        {/* Page Content */}
+        <div style={{ padding: "20px 16px 110px" }}>{pages[page]}</div>
+
+        {/* Bottom Nav */}
+        <div style={{ position: "fixed", bottom: 0, left: "50%", transform: "translateX(-50%)", width: "100%", maxWidth: 520, background: "rgba(253,244,247,0.92)", backdropFilter: "blur(24px) saturate(180%)", borderTop: `1px solid rgba(255,31,114,0.08)`, boxShadow: "0 -1px 0 rgba(255,255,255,0.9), 0 -8px 24px rgba(0,0,0,0.06)", display: "flex", padding: "10px 4px 18px", gap: 2 }}>
           {NAV.map(n => {
             const on = page === n.id;
-            return <button key={n.id} onClick={() => setPage(n.id)} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 2, padding: "5px 2px", background: "none", border: "none", cursor: "pointer" }}>
-              <span style={{ fontSize: 19, filter: on ? "drop-shadow(0 2px 6px rgba(255,31,114,0.55))" : "none", transition: "filter 0.2s" }}>{n.icon}</span>
-              <span style={{ fontSize: 10, fontWeight: on ? 700 : 400, color: on ? C.pink : C.mut }}>{n.lbl}</span>
-            </button>;
+            return (
+              <button key={n.id} onClick={() => setPage(n.id)} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 3, padding: "6px 2px", background: "none", border: "none", cursor: "pointer", position: "relative" }}>
+                {on && <div style={{ position: "absolute", top: 0, left: "50%", transform: "translateX(-50%)", width: 32, height: 32, borderRadius: "50%", background: C.pinkD, filter: "blur(8px)" }} />}
+                <span style={{ fontSize: 20, lineHeight: 1, filter: on ? `drop-shadow(0 2px 6px ${C.pinkGlow})` : "none", transition: "all 0.2s", transform: on ? "scale(1.12)" : "scale(1)" }}>{n.icon}</span>
+                <span style={{ fontSize: 10, fontWeight: on ? 800 : 500, color: on ? C.pink : C.mut, letterSpacing: "0.02em", transition: "color 0.2s" }}>{n.lbl}</span>
+              </button>
+            );
           })}
         </div>
       </div>
