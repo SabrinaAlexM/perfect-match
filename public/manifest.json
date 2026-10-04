@@ -1,11 +1,11 @@
 {
   "name": "Are You The One – Tracker",
   "short_name": "AYTO Tracker",
-  "description": "Are You The One Staffel 6 – Paarungen, Matchboxen und Wahrscheinlichkeiten. Von Sabrina.",
+  "description": "Are You The One Staffel 6 – Von Sabrina.",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#fff8f5",
-  "theme_color": "#ff1f72",
+  "background_color": "#fef9f0",
+  "theme_color": "#d4537e",
   "orientation": "portrait",
   "icons": [
     { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
