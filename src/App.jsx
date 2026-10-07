@@ -666,13 +666,11 @@ function MatchingNights({ st, setSt }) {
                     const isAnnMatch = ann && (!ann.typ || ann.typ==="match");
                     const isAnnKein  = ann && ann.typ==="kein_match";
 
-                    // Auto-exclude: if either person is taken by a ★ or confirmed match elsewhere
+                    // Auto-exclude: nur wenn du selbst jemanden als ★ markiert hast
                     const takenF = !isAnnMatch && !isConfirmed && (
-                      conf.some(c => c.frauId===p.frauId && c.mannId!==p.mannId) ||
                       (st.annahmen||[]).some(a => a.frauId===p.frauId && a.mannId!==p.mannId && (!a.typ||a.typ==="match"))
                     );
                     const takenM = !isAnnMatch && !isConfirmed && (
-                      conf.some(c => c.mannId===p.mannId && c.frauId!==p.frauId) ||
                       (st.annahmen||[]).some(a => a.mannId===p.mannId && a.frauId!==p.frauId && (!a.typ||a.typ==="match"))
                     );
                     const isAutoExcl = takenF || takenM;
