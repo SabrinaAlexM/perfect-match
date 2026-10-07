@@ -666,11 +666,18 @@ function MatchingNights({ st, setSt }) {
                     const isAnnMatch = ann && (!ann.typ || ann.typ==="match");
                     const isAnnKein  = ann && ann.typ==="kein_match";
 
-                    // Auto-exclude: nur wenn du selbst jemanden als ★ markiert hast
+                    // Auto-exclude: Person hat anderswo ein ★ oder bestätigtes Match
+                    const annMatchIds = new Set((st.annahmen||[]).filter(a=>!a.typ||a.typ==="match").map(a=>`${a.frauId}|${a.mannId}`));
+                    const confMatchFrau = new Set(conf.map(c=>c.frauId));
+                    const confMatchMann = new Set(conf.map(c=>c.mannId));
+                    const confMatchPair = new Set(conf.map(c=>`${c.frauId}|${c.mannId}`));
+                    const thisPairKey = `${p.frauId}|${p.mannId}`;
                     const takenF = !isAnnMatch && !isConfirmed && (
+                      confMatchFrau.has(p.frauId) && !confMatchPair.has(thisPairKey) ||
                       (st.annahmen||[]).some(a => a.frauId===p.frauId && a.mannId!==p.mannId && (!a.typ||a.typ==="match"))
                     );
                     const takenM = !isAnnMatch && !isConfirmed && (
+                      confMatchMann.has(p.mannId) && !confMatchPair.has(thisPairKey) ||
                       (st.annahmen||[]).some(a => a.mannId===p.mannId && a.frauId!==p.frauId && (!a.typ||a.typ==="match"))
                     );
                     const isAutoExcl = takenF || takenM;
