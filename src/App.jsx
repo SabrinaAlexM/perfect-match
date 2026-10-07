@@ -34,7 +34,7 @@ function ryserPerm(M) {
 /* ─── WAHRSCHEINLICHKEIT (mit Paarungen aus Matching Nights) ─── */
 function calcProbs(frauen, maenner, matchboxen, matchingNights, extraConf = [], doppelmatches = []) {
   // ── Setup: active participants ──
-  const allConf = [...matchboxen.filter(m => m.ergebnis === "match"), ...extraConf];
+  const allConf = [...matchboxen.filter(m => m.ergebnis === "match"), ...extraConf.filter(a => !a.typ || a.typ === "match")];
   const cF = new Set(allConf.map(m => m.frauId));
   const cM = new Set(allConf.map(m => m.mannId));
   doppelmatches.forEach(d => { if (d.gender === "frau") cF.add(d.personId); else cM.add(d.personId); });
@@ -50,6 +50,8 @@ function calcProbs(frauen, maenner, matchboxen, matchingNights, extraConf = [], 
       });
     }
   });
+  // Kein-Match-Annahmen auch ausschliessen
+  extraConf.filter(a => a.typ === "kein_match").forEach(a => excl.add(`${a.frauId}|${a.mannId}`));
 
   const aF = frauen.filter(f => !cF.has(f.id));
   const aM = maenner.filter(m => !cM.has(m.id));
@@ -270,6 +272,111 @@ const AppIcon = ({ size = 32 }) => (
   </svg>
 );
 
+/* ─── BEST GUESS MATCHING ─── */
+function bestGuessMatching(frauen, maenner, probs, confirmed, doppelmatches) {
+  // Start with confirmed matches
+  const result = confirmed.map(c => ({ frauId: c.frauId, mannId: c.mannId, prob: 100, status: "confirmed" }));
+  const usedF = new Set(confirmed.map(c => c.frauId));
+  const usedM = new Set(confirmed.map(c => c.mannId));
+  // Doppelmatch exits: person left, their match unknown → skip them
+  const dmF = new Set((doppelmatches||[]).filter(d=>d.gender==="frau").map(d=>d.personId));
+  const dmM = new Set((doppelmatches||[]).filter(d=>d.gender==="mann").map(d=>d.personId));
+
+  // Build candidates
+  const candidates = [];
+  frauen.forEach(f => {
+    if (usedF.has(f.id) || dmF.has(f.id)) return;
+    maenner.forEach(m => {
+      if (usedM.has(m.id) || dmM.has(m.id)) return;
+      const key = `${f.id}|${m.id}`;
+      const p = probs?.[key] ?? 0;
+      candidates.push({ frauId: f.id, mannId: m.id, prob: p, status: p === 0 ? "excluded" : "guess" });
+    });
+  });
+  candidates.sort((a, b) => b.prob - a.prob);
+
+  // Greedy max-weight matching
+  for (const c of candidates) {
+    if (!usedF.has(c.frauId) && !usedM.has(c.mannId) && c.prob > 0) {
+      result.push(c);
+      usedF.add(c.frauId);
+      usedM.add(c.mannId);
+    }
+  }
+  return result;
+}
+
+function BestGuess({ st, pd }) {
+  const { probs, confirmed } = pd;
+  if (!probs || Object.keys(probs).length === 0) return null;
+
+  const matches = bestGuessMatching(
+    st.teilnehmer.frauen, st.teilnehmer.maenner,
+    probs, confirmed || [], st.doppelmatches || []
+  );
+  if (matches.length === 0) return null;
+
+  const total = matches.length;
+  const avgConf = Math.round(matches.filter(m=>m.status!=="confirmed").reduce((s,m)=>s+m.prob,0) / Math.max(1,matches.filter(m=>m.status!=="confirmed").length));
+  const confident = matches.filter(m => m.prob >= 60 && m.status !== "confirmed").length;
+
+  return (
+    <Card sx={{ marginBottom: 14, border: `1.5px solid ${C.brd2}` }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
+        <div>
+          <div style={{ fontFamily: "'Cormorant Garamond',Georgia,serif", fontSize: 18, fontStyle: "italic", color: C.brown, fontWeight: 600 }}>Meine aktuelle Vermutung</div>
+          <div style={{ fontSize: 11, color: C.warm, marginTop: 2 }}>Basierend auf Night-Paarungen & Matchbox-Ergebnissen</div>
+        </div>
+        <div style={{ textAlign: "right" }}>
+          <div style={{ fontSize: 20, fontWeight: 700, color: C.pink }}>{avgConf}%</div>
+          <div style={{ fontSize: 10, color: C.warm }}>ø Konfidenz</div>
+        </div>
+      </div>
+
+      {matches.map((m, i) => {
+        const f = st.teilnehmer.frauen.find(x => x.id === m.frauId);
+        const ma = st.teilnehmer.maenner.find(x => x.id === m.mannId);
+        const isConf = m.status === "confirmed";
+        const col = isConf ? C.green : m.prob >= 60 ? C.pink : m.prob >= 35 ? C.gold : C.warm;
+        const bg  = isConf ? C.greenD : m.prob >= 60 ? C.pinkD : m.prob >= 35 ? C.goldD : "#f9f5ef";
+
+        return (
+          <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 12px", borderRadius: 12, background: bg, marginBottom: 6, border: `1px solid ${col}33` }}>
+            <div style={{ fontSize: 13, color: C.warm, fontWeight: 700, width: 20, flexShrink: 0, textAlign: "center" }}>{i+1}</div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 13, fontWeight: 700 }}>
+                <span style={{ color: C.pink }}>{f?.name?.split(" ")[0]}</span>
+                <span style={{ color: C.warm, margin: "0 6px" }}>+</span>
+                <span style={{ color: C.blue }}>{ma?.name?.split(" ")[0]}</span>
+              </div>
+              {!isConf && (
+                <div style={{ height: 4, borderRadius: 2, background: "rgba(0,0,0,0.08)", marginTop: 5 }}>
+                  <div style={{ height: "100%", width: `${m.prob}%`, background: col, borderRadius: 2, transition: "width 0.5s" }} />
+                </div>
+              )}
+            </div>
+            <div style={{ textAlign: "right", flexShrink: 0 }}>
+              {isConf
+                ? <span style={{ fontSize: 12, fontWeight: 700, color: C.green }}>✓ Match</span>
+                : <span style={{ fontSize: 16, fontWeight: 800, color: col }}>{m.prob}%</span>
+              }
+            </div>
+          </div>
+        );
+      })}
+
+      {matches.length < 10 && (
+        <div style={{ fontSize: 11, color: C.warm, textAlign: "center", marginTop: 6, fontStyle: "italic" }}>
+          {10 - matches.length} Paarung{10-matches.length>1?"en":""} noch offen – mehr Daten helfen!
+        </div>
+      )}
+      <div style={{ fontSize: 11, color: C.warm, textAlign: "center", marginTop: 8, padding: "8px 0 0", borderTop: `1px solid ${C.brd}`, fontStyle: "italic" }}>
+        💡 Je mehr Matchbox-Ergebnisse und Nights, desto präziser wird die Vermutung.
+      </div>
+    </Card>
+  );
+}
+
 /* ─── TOP PAARE ─── */
 function TopPaare({ st }) {
   const pd = useMemo(() =>
@@ -332,7 +439,7 @@ function TopPaare({ st }) {
 }
 
 /* ─── HOME ─── */
-function Home({ st, onShowOnboarding, setPage }) {
+function Home({ st, onShowOnboarding, setPage, pd }) {
   const conf = st.matchboxen.filter(m => m.ergebnis === "match");
   const lastNight = st.matchingNights[st.matchingNights.length - 1];
   const canAddNight = st.matchboxen.length > st.matchingNights.length || (st.matchingNights.length === 0 && st.matchboxen.length === 0);
@@ -537,15 +644,65 @@ function MatchingNights({ st, setSt }) {
               </div>
             </div>
             {night.paarungen.length > 0 && (
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
-                {night.paarungen.map((p, i) => {
-                  const f = st.teilnehmer.frauen.find(x => x.id === p.frauId);
-                  const m = st.teilnehmer.maenner.find(x => x.id === p.mannId);
-                  const isMatch = conf.some(c => c.frauId === p.frauId && c.mannId === p.mannId);
-                  return <span key={i} style={{ padding: "3px 9px", borderRadius: 99, fontSize: 12, fontWeight: 600, background: isMatch ? "#b8f0d8" : "#f0edf9", border: `1px solid ${isMatch ? "#00906a55" : C.brd}`, color: isMatch ? "#005c38" : C.txt }}>
-                    {isMatch ? "✅ " : ""}{f?.name?.split(" ")[0]} + {m?.name?.split(" ")[0]}
-                  </span>;
-                })}
+              <div>
+                {/* Light count summary */}
+                {(() => {
+                  const cu = night.lichter - conf.length;
+                  const annMatch = (st.annahmen||[]).filter(a => night.paarungen.some(p => p.frauId===a.frauId && p.mannId===a.mannId) && (!a.typ||a.typ==="match")).length;
+                  const annKein  = (st.annahmen||[]).filter(a => night.paarungen.some(p => p.frauId===a.frauId && p.mannId===a.mannId) && a.typ==="kein_match").length;
+                  return cu > 0 ? (
+                    <div style={{ fontSize: 11, color: C.warm, marginBottom: 6 }}>
+                      {annMatch} von {cu} noch unbestätigten Lichtern als ★ markiert
+                      {annMatch === cu && <span style={{ color: C.green, fontWeight: 700 }}> · ✅ vollständig!</span>}
+                    </div>
+                  ) : null;
+                })()}
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
+                  {night.paarungen.map((p, i) => {
+                    const f = st.teilnehmer.frauen.find(x => x.id === p.frauId);
+                    const m = st.teilnehmer.maenner.find(x => x.id === p.mannId);
+                    const isConfirmed = conf.some(c => c.frauId === p.frauId && c.mannId === p.mannId);
+                    const ann = (st.annahmen||[]).find(a => a.frauId===p.frauId && a.mannId===p.mannId);
+                    const isAnnMatch = ann && (!ann.typ || ann.typ==="match");
+                    const isAnnKein  = ann && ann.typ==="kein_match";
+
+                    // Auto-exclude: if either person is taken by a ★ or confirmed match elsewhere
+                    const takenF = !isAnnMatch && !isConfirmed && (
+                      conf.some(c => c.frauId===p.frauId && c.mannId!==p.mannId) ||
+                      (st.annahmen||[]).some(a => a.frauId===p.frauId && a.mannId!==p.mannId && (!a.typ||a.typ==="match"))
+                    );
+                    const takenM = !isAnnMatch && !isConfirmed && (
+                      conf.some(c => c.mannId===p.mannId && c.frauId!==p.frauId) ||
+                      (st.annahmen||[]).some(a => a.mannId===p.mannId && a.frauId!==p.frauId && (!a.typ||a.typ==="match"))
+                    );
+                    const isAutoExcl = takenF || takenM;
+
+                    let bg, col, brd, prefix;
+                    if (isConfirmed)   { bg="#b8f0d8"; col="#005c38"; brd="#00906a44"; prefix="✅ "; }
+                    else if (isAnnMatch)  { bg="#e0f0ff"; col="#0060b0"; brd="#3b82f644"; prefix="★ "; }
+                    else if (isAnnKein)   { bg="#ffc0c8"; col="#9a0018"; brd="#ef444444"; prefix="✗ "; }
+                    else if (isAutoExcl)  { bg="#fef0f0"; col="#ccaaa0"; brd="#e0c0bc44"; prefix="✕ "; }
+                    else               { bg="#f9f5ef"; col=C.mut; brd=C.brd; prefix=""; }
+
+                    const clickable = !isConfirmed && !isAutoExcl;
+                    return (
+                      <span key={i}
+                        onClick={() => {
+                          if (!clickable) return;
+                          setSt(s => {
+                            const ann2 = s.annahmen || [];
+                            const ex = ann2.find(a => a.frauId===p.frauId && a.mannId===p.mannId);
+                            if (!ex)                return { ...s, annahmen: [...ann2, { frauId: p.frauId, mannId: p.mannId, typ: "match" }] };
+                            if (ex.typ==="match")   return { ...s, annahmen: ann2.map(a => a.frauId===p.frauId&&a.mannId===p.mannId ? {...a,typ:"kein_match"} : a) };
+                            return { ...s, annahmen: ann2.filter(a => !(a.frauId===p.frauId&&a.mannId===p.mannId)) };
+                          });
+                        }}
+                        style={{ padding: "5px 12px", borderRadius: 99, fontSize: 12, fontWeight: 600, background: bg, border: `1px solid ${brd}`, color: col, cursor: clickable ? "pointer" : "default", userSelect: "none", transition: "all 0.15s", display: "inline-flex", alignItems: "center", gap: 3 }}>
+                        {prefix}{f?.name?.split(" ")[0]} + {m?.name?.split(" ")[0]}
+                      </span>
+                    );
+                  })}
+                </div>
               </div>
             )}
           </Card>
@@ -630,6 +787,21 @@ function MatchingNights({ st, setSt }) {
             })}
           </div>
 
+          {/* Confirmed matches still count as lights */}
+          {conf.length > 0 && (
+            <div style={{ marginBottom: 14, padding: "10px 14px", background: C.greenD, borderRadius: 12, border: `1px solid ${C.green}44` }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: C.green, marginBottom: 6 }}>✅ Ausgezogene Paare – leuchten weiterhin ({conf.length} Licht{conf.length>1?"er":""})</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
+                {conf.map(mb => {
+                  const f = st.teilnehmer.frauen.find(x => x.id === mb.frauId);
+                  const m = st.teilnehmer.maenner.find(x => x.id === mb.mannId);
+                  return <span key={mb.id} style={{ fontSize: 12, padding: "3px 10px", borderRadius: 99, background: "#b8f0d8", color: "#005c38", fontWeight: 600, border: "1px solid #00906a33" }}>
+                    {f?.name?.split(" ")[0]} + {m?.name?.split(" ")[0]}
+                  </span>;
+                })}
+              </div>
+            </div>
+          )}
           <div style={{ display: "flex", gap: 8 }}>
             <Btn onClick={save} dis={lichter === ""}>Speichern</Btn>
             <Btn onClick={() => { setOpen(false); setLichter(""); setPaare({}); }} v="ghost">Abbrechen</Btn>
@@ -755,7 +927,7 @@ function Matchboxen({ st, setSt }) {
 }
 
 /* ─── KREUZTABELLE ─── */
-function Kreuztabelle({ frauen, maenner, pairCounts, mbStatus, annahmen = [], nightExclSet = new Set(), onToggle, interactive = false }) {
+function Kreuztabelle({ frauen, maenner, pairCounts, mbStatus, annahmen = [], nightExclSet = new Set(), dmExitIds = new Set(), onToggle, interactive = false }) {
   const annSet = new Set(annahmen.map(a => `${a.frauId}|${a.mannId}`));
 
   // Confirmed real matches
@@ -785,8 +957,11 @@ function Kreuztabelle({ frauen, maenner, pairCounts, mbStatus, annahmen = [], ni
       return { bg: "#eeeeee", col: "#aaaaaa", brd: "#cccccc", txt: "✕", dim: true, click: false };
 
     // Diese Zelle IST die Annahme
-    if (interactive && isAnn)
+    if (interactive && isAnn) {
+      const aTyp = annahmen.find(a => a.frauId===fId&&a.mannId===mId)?.typ;
+      if (aTyp === "kein_match") return { bg: "#ffc0c8", col: "#9a0018", brd: "#d4001e", txt: "✗", dim: false, click: true };
       return { bg: "#e0c8ff", col: "#5500aa", brd: "#7a00cc", txt: "★", dim: false, click: true };
+    }
 
     // Frau/Mann durch Annahme vergeben → ausgelöscht
     if (interactive && (annFrau[fId] || annMann[mId]))
@@ -818,29 +993,42 @@ function Kreuztabelle({ frauen, maenner, pairCounts, mbStatus, annahmen = [], ni
         <div style={{ display: "flex", marginBottom: 3 }}>
           <div style={{ width: NW, flexShrink: 0 }} />
           {maenner.map(m => (
-            <div key={m.id} style={{ width: W, flexShrink: 0, textAlign: "center", fontSize: 9, fontWeight: 700, color: matchedMann[m.id] ? "#aaa" : C.blue, padding: "2px 1px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", textDecoration: matchedMann[m.id] ? "line-through" : "none" }}>
+            <div key={m.id} style={{ width: W, flexShrink: 0, textAlign: "center", fontSize: 9, fontWeight: 700,
+              color: dmExitIds.has(m.id) ? "#ccc" : matchedMann[m.id] ? "#aaa" : C.blue,
+              padding: "2px 1px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+              textDecoration: (matchedMann[m.id] || dmExitIds.has(m.id)) ? "line-through" : "none",
+              opacity: dmExitIds.has(m.id) ? 0.4 : 1 }}>
               {firstName(m.name)}
             </div>
           ))}
         </div>
         {/* Rows */}
-        {frauen.map(f => (
-          <div key={f.id} style={{ display: "flex", marginBottom: 2 }}>
-            <div style={{ width: NW, flexShrink: 0, fontSize: 9, fontWeight: 700, color: matchedFrau[f.id] ? "#aaa" : C.pink, textAlign: "right", paddingRight: 5, display: "flex", alignItems: "center", justifyContent: "flex-end", textDecoration: matchedFrau[f.id] ? "line-through" : "none", overflow: "hidden", whiteSpace: "nowrap" }}>
+        {frauen.map(f => {
+          const isDmExitRow = dmExitIds.has(f.id);
+          return (
+          <div key={f.id} style={{ display: "flex", marginBottom: 2, opacity: isDmExitRow ? 0.38 : 1 }}>
+            <div style={{ width: NW, flexShrink: 0, fontSize: 9, fontWeight: 700,
+              color: isDmExitRow ? "#bbb" : matchedFrau[f.id] ? "#aaa" : C.pink,
+              textAlign: "right", paddingRight: 5, display: "flex", alignItems: "center", justifyContent: "flex-end",
+              textDecoration: (matchedFrau[f.id] || isDmExitRow) ? "line-through" : "none",
+              overflow: "hidden", whiteSpace: "nowrap" }}>
               {firstName(f.name)}
             </div>
             {maenner.map(m => {
-              const c = getCell(f.id, m.id);
+              const isDmExitCol = dmExitIds.has(m.id);
+              const c = (isDmExitRow || isDmExitCol)
+                ? { bg: "#f5f5f5", col: "#ccc", brd: "#e0e0e0", txt: "", dim: true, click: false }
+                : getCell(f.id, m.id);
               return (
                 <div key={m.id}
-                  onClick={() => c.click && !c.dim && onToggle && onToggle(f.id, m.id)}
-                  style={{ width: W - 2, height: W - 2, flexShrink: 0, margin: "0 1px", borderRadius: 5, background: c.bg, border: `1px solid ${c.brd}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, color: c.col, cursor: c.click && !c.dim ? "pointer" : "default", userSelect: "none", opacity: c.dim ? 0.5 : 1 }}>
+                  onClick={() => c.click && !c.dim && !isDmExitRow && !isDmExitCol && onToggle && onToggle(f.id, m.id)}
+                  style={{ width: W - 2, height: W - 2, flexShrink: 0, margin: "0 1px", borderRadius: 5, background: c.bg, border: `1px solid ${c.brd}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, color: c.col, cursor: c.click && !c.dim ? "pointer" : "default", userSelect: "none", opacity: c.dim ? 0.4 : 1 }}>
                   {c.txt}
                 </div>
               );
             })}
           </div>
-        ))}
+        );})}
       </div>
     </div>
   );
@@ -949,11 +1137,19 @@ function Analyse({ st, setSt, pd }) {
   const [expGender, setExpGender] = useState("frauen");
 
   const annahmen = st.annahmen || [];
-  const toggleAnnahme = (frauId, mannId) => {
+  const toggleAnnahme = (frauId, mannId, forcTyp) => {
     setSt(s => {
       const ann = s.annahmen || [];
-      const exists = ann.some(a => a.frauId === frauId && a.mannId === mannId);
-      return { ...s, annahmen: exists ? ann.filter(a => !(a.frauId === frauId && a.mannId === mannId)) : [...ann, { frauId, mannId }] };
+      const existing = ann.find(a => a.frauId === frauId && a.mannId === mannId);
+      if (forcTyp) {
+        // from Night-Check: cycle neutral→match→kein_match→neutral
+        if (!existing) return { ...s, annahmen: [...ann, { frauId, mannId, typ: "match" }] };
+        if (existing.typ === "match") return { ...s, annahmen: ann.map(a => a.frauId===frauId&&a.mannId===mannId ? {...a,typ:"kein_match"} : a) };
+        return { ...s, annahmen: ann.filter(a => !(a.frauId===frauId&&a.mannId===mannId)) };
+      }
+      // from Experiment tab: toggle match on/off
+      if (!existing) return { ...s, annahmen: [...ann, { frauId, mannId, typ: "match" }] };
+      return { ...s, annahmen: ann.filter(a => !(a.frauId===frauId&&a.mannId===mannId)) };
     });
   };
   const clearAnnahmen = () => setSt(s => ({ ...s, annahmen: [] }));
@@ -1111,7 +1307,7 @@ function Analyse({ st, setSt, pd }) {
           </div>
 
           <Card sx={{ padding: 12, marginBottom: 14 }}>
-            <Kreuztabelle frauen={frauen} maenner={maenner} pairCounts={pairCounts} mbStatus={mbStatus} annahmen={annahmen} nightExclSet={nightExclSet} onToggle={toggleAnnahme} interactive />
+            <Kreuztabelle frauen={frauen} maenner={maenner} pairCounts={pairCounts} mbStatus={mbStatus} annahmen={annahmen} nightExclSet={nightExclSet} dmExitIds={new Set(dmEx.map(d => d.personId))} onToggle={toggleAnnahme} interactive />
           </Card>
 
           {annahmen.length > 0 && (
@@ -1121,8 +1317,8 @@ function Analyse({ st, setSt, pd }) {
                 {annahmen.map(a => {
                   const f = frauen.find(x => x.id === a.frauId);
                   const m = maenner.find(x => x.id === a.mannId);
-                  return <span key={`${a.frauId}|${a.mannId}`} onClick={() => toggleAnnahme(a.frauId, a.mannId)} style={{ fontSize: 11, padding: "3px 8px", borderRadius: 99, background: "#fff", color: C.purple, border: `1px solid ${C.purple}55`, cursor: "pointer", fontWeight: 600 }}>
-                    {f?.name?.split(" ")[0]} + {m?.name?.split(" ")[0]} ×
+                  return <span key={`${a.frauId}|${a.mannId}`} onClick={() => toggleAnnahme(a.frauId, a.mannId)} style={{ fontSize: 11, padding: "3px 8px", borderRadius: 99, background: a.typ==="kein_match" ? "#ffc0c8" : "#fff", color: a.typ==="kein_match" ? "#9a0018" : C.purple, border: `1px solid ${a.typ==="kein_match" ? "#d4001e" : C.purple}55`, cursor: "pointer", fontWeight: 600 }}>
+                    {a.typ==="kein_match" ? "✗ " : "★ "}{f?.name?.split(" ")[0]} + {m?.name?.split(" ")[0]} ×
                   </span>;
                 })}
               </div>
@@ -1226,22 +1422,27 @@ function Analyse({ st, setSt, pd }) {
                       const isAnn = annahmen.some(a => a.frauId === p.frauId && a.mannId === p.mannId);
                       const isElim = (correctNeeded === 0 || (allFound && !isAnn && !isConf)) && !isKein;
                       const clickable = !isConf && !isKein;
-                      let icon, bg, col;
-                      if (isConf)      { icon = "✓"; bg = "#b8f0d8"; col = "#005c38"; }
-                      else if (isKein) { icon = "✗"; bg = "#ffc0c8"; col = "#9a0018"; }
-                      else if (isAnn)  { icon = "★"; bg = "#e0c8ff"; col = "#5500aa"; }
-                      else if (isElim) { icon = "–"; bg = "#ffdde2"; col = "#c0003a"; }
-                      else             { icon = "?"; bg = "#f5f5f5"; col = C.mut; }
+                      // 3-state: neutral→★match→✗kein_match→neutral
+                      const annTyp = annahmen.find(a => a.frauId===p.frauId&&a.mannId===p.mannId)?.typ;
+                      const isAnnMatch = isAnn && annTyp === "match";
+                      const isAnnKein  = isAnn && annTyp === "kein_match";
+                      let icon, bg, col, hint;
+                      if (isConf)       { icon="✓"; bg="#b8f0d8"; col="#005c38"; hint=""; }
+                      else if (isKein)  { icon="✗"; bg="#ffc0c8"; col="#9a0018"; hint=""; }
+                      else if (isAnnMatch){ icon="★"; bg="#e8f5ff"; col="#0060b0"; hint="2× = Kein Match"; }
+                      else if (isAnnKein){ icon="✗"; bg="#ffc0c8"; col="#9a0018"; hint="3× = Neutral"; }
+                      else if (isElim)  { icon="–"; bg="#ffdde2"; col="#c0003a"; hint=""; }
+                      else              { icon="?"; bg="#f9f9f9"; col=C.mut; hint="1× = Match-Annahme"; }
                       return (
-                        <div key={i} onClick={() => clickable && toggleAnnahme(p.frauId, p.mannId)}
-                          style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 12px", borderRadius: 10, background: bg, cursor: clickable ? "pointer" : "default", border: `1px solid ${col}33` }}>
+                        <div key={i} onClick={() => clickable && toggleAnnahme(p.frauId, p.mannId, true)}
+                          style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 12px", borderRadius: 10, background: bg, cursor: clickable ? "pointer" : "default", border: `1px solid ${col}33`, transition: "all 0.15s" }}>
                           <div style={{ width: 26, height: 26, borderRadius: 99, background: `${col}22`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 800, color: col, flexShrink: 0 }}>{icon}</div>
                           <div style={{ flex: 1, fontSize: 13, fontWeight: 600 }}>
                             <span style={{ color: C.pink }}>{f?.name}</span>
                             <span style={{ color: C.mut, margin: "0 6px" }}>+</span>
                             <span style={{ color: C.blue }}>{m?.name}</span>
                           </div>
-                          {clickable && <div style={{ fontSize: 10, color: col, opacity: 0.8 }}>{isAnn ? "× entfernen" : "+ Annahme"}</div>}
+                          {clickable && hint && <div style={{ fontSize: 10, color: col, opacity: 0.65 }}>{hint}</div>}
                         </div>
                       );
                     })}
@@ -1592,7 +1793,7 @@ export default function App() {
   const [page, setPage] = useState("home");
   const pd = useMemo(() => calcProbs(st.teilnehmer.frauen, st.teilnehmer.maenner, st.matchboxen, st.matchingNights, [], st.doppelmatches || []), [st]);
   const pages = {
-    home: <Home st={st} onShowOnboarding={() => setSt(s => ({ ...s, onboardingDone: false }))} setPage={setPage} />,
+    home: <Home st={st} onShowOnboarding={() => setSt(s => ({ ...s, onboardingDone: false }))} setPage={setPage} pd={pd} />,
     nights: <MatchingNights st={st} setSt={setSt} />,
     matchbox: <Matchboxen st={st} setSt={setSt} />,
     analyse: <Analyse st={st} setSt={setSt} pd={pd} />,
