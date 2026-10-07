@@ -34,7 +34,7 @@ function ryserPerm(M) {
 /* ─── WAHRSCHEINLICHKEIT (mit Paarungen aus Matching Nights) ─── */
 function calcProbs(frauen, maenner, matchboxen, matchingNights, extraConf = [], doppelmatches = []) {
   // ── Setup: active participants ──
-  const allConf = [...matchboxen.filter(m => m.ergebnis === "match"), ...extraConf];
+  const allConf = [...matchboxen.filter(m => m.ergebnis === "match"), ...extraConf.filter(a => !a.typ || a.typ === "match")];
   const cF = new Set(allConf.map(m => m.frauId));
   const cM = new Set(allConf.map(m => m.mannId));
   doppelmatches.forEach(d => { if (d.gender === "frau") cF.add(d.personId); else cM.add(d.personId); });
@@ -50,6 +50,8 @@ function calcProbs(frauen, maenner, matchboxen, matchingNights, extraConf = [], 
       });
     }
   });
+  // Kein-Match-Annahmen auch ausschliessen
+  extraConf.filter(a => a.typ === "kein_match").forEach(a => excl.add(`${a.frauId}|${a.mannId}`));
 
   const aF = frauen.filter(f => !cF.has(f.id));
   const aM = maenner.filter(m => !cM.has(m.id));
@@ -60,11 +62,11 @@ function calcProbs(frauen, maenner, matchboxen, matchingNights, extraConf = [], 
   const constraints = (matchingNights || [])
     .map(night => {
       const needed = Math.max(0, night.lichter - confirmedCount);
-      // Only nights with positive lichter and actual active pairings matter
+      // Only consider people who were active IN THIS night (eintrittNachNight check)
       const activePairs = (night.paarungen || [])
         .map(p => {
-          const fi = aF.findIndex(f => f.id === p.frauId);
-          const mi = aM.findIndex(m => m.id === p.mannId);
+          const fi = aF.findIndex(f => f.id === p.frauId && !(f.eintrittNachNight >= night.nummer));
+          const mi = aM.findIndex(m => m.id === p.mannId && !(m.eintrittNachNight >= night.nummer));
           return (fi >= 0 && mi >= 0) ? fi * 100 + mi : -1;
         })
         .filter(x => x >= 0);
@@ -155,83 +157,84 @@ function calcProbs(frauen, maenner, matchboxen, matchingNights, extraConf = [], 
 const uid = () => Math.random().toString(36).slice(2, 9);
 const firstName = name => name.split(" ")[0].slice(0, 6);
 
-/* ─── DESIGN SYSTEM ─── */
+/* ─── SOFT LUXURY DESIGN SYSTEM ─── */
 const C = {
-  bg: "#fdf4f7",
-  surf: "#ffffff",
-  brd: "rgba(255,31,114,0.10)",
-  pink: "#ff1f72", pinkD: "rgba(255,31,114,0.08)", pinkGlow: "rgba(255,31,114,0.25)",
-  gold: "#f59e0b", goldD: "rgba(245,158,11,0.10)",
-  blue: "#3b82f6", blueD: "rgba(59,130,246,0.09)",
-  green: "#10b981", greenD: "rgba(16,185,129,0.09)",
-  red: "#ef4444", redD: "rgba(239,68,68,0.09)",
-  purple: "#8b5cf6", purpleD: "rgba(139,92,246,0.09)",
-  coral: "#f97316", coralD: "rgba(249,115,22,0.09)",
-  txt: "#0f0010", mut: "rgba(15,0,16,0.45)",
-  // Glassmorphism
-  glass: "rgba(255,255,255,0.72)",
-  glassBrd: "rgba(255,255,255,0.9)",
+  bg:     "#fef9f0",
+  surf:   "#ffffff",
+  brd:    "#e8d5b0",
+  brd2:   "rgba(212,83,126,0.18)",
+  pink:   "#d4537e", pinkD: "rgba(212,83,126,0.10)",
+  gold:   "#b8860b", goldD: "rgba(184,134,11,0.10)",
+  goldL:  "#c8920a",
+  blue:   "#4a72a0", blueD: "rgba(74,114,160,0.10)",
+  green:  "#4a8c6a", greenD: "rgba(74,140,106,0.10)",
+  red:    "#c0392b", redD: "rgba(192,57,43,0.10)",
+  purple: "#7b5ea0", purpleD: "rgba(123,94,160,0.10)",
+  brown:  "#3a2000",
+  cream:  "#fef9f0",
+  warm:   "#b89a6a",
+  txt:    "#2a1500",
+  mut:    "rgba(42,21,0,0.45)",
 };
-const GR = (a, b) => `linear-gradient(135deg,${a},${b})`;
-const GR3 = (a, b, c) => `linear-gradient(135deg,${a},${b},${c})`;
-const MESH = `radial-gradient(ellipse at 20% 20%, rgba(255,31,114,0.12) 0%, transparent 50%),
-  radial-gradient(ellipse at 80% 80%, rgba(245,158,11,0.10) 0%, transparent 50%),
-  radial-gradient(ellipse at 60% 10%, rgba(139,92,246,0.08) 0%, transparent 40%),
-  #fdf4f7`;
-const shadow = (col, str = 0.2) => `0 4px 24px rgba(0,0,0,0.06), 0 0 0 1px ${col}22, 0 8px 32px ${col}${Math.round(str*255).toString(16).padStart(2,'0')}`;
+const GR  = (a,b)   => `linear-gradient(135deg,${a},${b})`;
+const GR3 = (a,b,c) => `linear-gradient(135deg,${a},${b},${c})`;
+const MESH = `radial-gradient(ellipse at 20% 10%, rgba(212,83,126,0.07) 0%, transparent 55%),
+  radial-gradient(ellipse at 85% 80%, rgba(184,134,11,0.06) 0%, transparent 50%),
+  #fef9f0`;
+const LUXURY = GR3(C.pink, "#b8506e", C.goldL);
+const shadow = () => `0 2px 12px rgba(42,21,0,0.07), 0 1px 0 rgba(255,255,255,0.9) inset`;
 
 /* ─── PRIMITIVES ─── */
-const Card = ({ children, acc, sx = {}, glow }) => (
+const Card = ({ children, acc, sx = {} }) => (
   <div style={{
     background: C.surf,
     border: `1px solid ${acc || C.brd}`,
-    borderRadius: 20,
-    padding: 20,
-    boxShadow: glow ? shadow(glow, 0.22) : "0 2px 16px rgba(0,0,0,0.06), 0 0 0 1px rgba(255,31,114,0.06)",
-    backdropFilter: "blur(12px)",
+    borderRadius: 18,
+    padding: 18,
+    boxShadow: shadow(),
     ...sx
   }}>{children}</div>
 );
 const GlassCard = ({ children, sx = {} }) => (
   <div style={{
-    background: C.glass,
-    border: `1px solid ${C.glassBrd}`,
-    borderRadius: 20,
-    padding: 20,
-    boxShadow: "0 8px 32px rgba(0,0,0,0.08), inset 0 1px 0 rgba(255,255,255,0.9)",
-    backdropFilter: "blur(20px)",
+    background: "rgba(254,249,240,0.85)",
+    border: `1px solid ${C.brd}`,
+    borderRadius: 18,
+    padding: 18,
+    boxShadow: shadow(),
     ...sx
   }}>{children}</div>
 );
 const Pill = ({ children, col, solid }) => (
   <span style={{
     display: "inline-flex", alignItems: "center",
-    padding: "4px 12px", borderRadius: 99, fontSize: 11, fontWeight: 700, letterSpacing: "0.02em",
-    background: solid ? col : `${col}15`,
+    padding: "3px 11px", borderRadius: 99, fontSize: 11, fontWeight: 600,
+    background: solid ? col : `${col}18`,
     color: solid ? "#fff" : col,
-    border: `1px solid ${col}${solid ? "00" : "40"}`,
-    boxShadow: solid ? `0 2px 8px ${col}44` : "none",
+    border: `1px solid ${col}33`,
+    fontFamily: "'Cormorant Garamond', Georgia, serif",
+    letterSpacing: "0.03em",
   }}>{children}</span>
 );
 const Btn = ({ children, onClick, v = "pri", sm, dis, full, sx = {} }) => {
   const vs = {
-    pri: { background: GR3(C.pink, "#e8005a", "#c0003a"), color: "#fff", border: "none", boxShadow: `0 4px 16px ${C.pinkGlow}, 0 1px 0 rgba(255,255,255,0.2) inset` },
-    ghost: { background: "rgba(255,255,255,0.8)", color: C.txt, border: `1px solid rgba(255,31,114,0.15)`, boxShadow: "0 1px 4px rgba(0,0,0,0.06)" },
-    gold: { background: GR3(C.gold, "#d97706", "#b45309"), color: "#fff", border: "none", boxShadow: "0 4px 16px rgba(245,158,11,0.35)" },
+    pri:    { background: LUXURY, color: "#fff", border: "none", boxShadow: "0 3px 14px rgba(212,83,126,0.30)" },
+    ghost:  { background: "#fff", color: C.brown, border: `1px solid ${C.brd}`, boxShadow: shadow() },
+    gold:   { background: GR(C.goldL, C.gold), color: "#fff", border: "none", boxShadow: "0 3px 12px rgba(184,134,11,0.25)" },
     danger: { background: C.redD, color: C.red, border: `1px solid ${C.red}33` },
-    purple: { background: GR3(C.purple, "#7c3aed", "#6d28d9"), color: "#fff", border: "none", boxShadow: "0 4px 16px rgba(139,92,246,0.35)" },
+    purple: { background: GR(C.purple, "#5d3f8a"), color: "#fff", border: "none", boxShadow: "0 3px 12px rgba(123,94,160,0.25)" },
   };
   return <button onClick={onClick} disabled={dis} style={{
     display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6,
     padding: sm ? "7px 16px" : "12px 22px",
-    borderRadius: 14, cursor: dis ? "not-allowed" : "pointer",
-    fontFamily: "inherit", fontSize: sm ? 13 : 14, fontWeight: 700,
-    opacity: dis ? 0.35 : 1, width: full ? "100%" : "auto",
-    letterSpacing: "0.01em", transition: "transform 0.1s, box-shadow 0.1s",
+    borderRadius: 12, cursor: dis ? "not-allowed" : "pointer",
+    fontFamily: "'Plus Jakarta Sans', sans-serif", fontSize: sm ? 13 : 14, fontWeight: 600,
+    opacity: dis ? 0.38 : 1, width: full ? "100%" : "auto",
+    letterSpacing: "0.015em",
     ...vs[v], ...sx
   }}>{children}</button>;
 };
-const inputStyle = { width: "100%", boxSizing: "border-box", background: "rgba(255,255,255,0.9)", border: `1.5px solid rgba(255,31,114,0.12)`, borderRadius: 12, padding: "11px 14px", color: C.txt, fontFamily: "inherit", fontSize: 14, outline: "none", boxShadow: "0 1px 4px rgba(0,0,0,0.04) inset" };
+const inputStyle = { width: "100%", boxSizing: "border-box", background: "#fffdf7", border: `1px solid ${C.brd}`, borderRadius: 11, padding: "11px 14px", color: C.txt, fontFamily: "'Plus Jakarta Sans', sans-serif", fontSize: 14, outline: "none" };
 const Inp = ({ val, set, ph, tp = "text", sx = {} }) => (
   <input value={val} type={tp} onChange={e => set(e.target.value)} placeholder={ph} style={{ ...inputStyle, ...sx }} />
 );
@@ -268,6 +271,111 @@ const AppIcon = ({ size = 32 }) => (
     </g>
   </svg>
 );
+
+/* ─── BEST GUESS MATCHING ─── */
+function bestGuessMatching(frauen, maenner, probs, confirmed, doppelmatches) {
+  // Start with confirmed matches
+  const result = confirmed.map(c => ({ frauId: c.frauId, mannId: c.mannId, prob: 100, status: "confirmed" }));
+  const usedF = new Set(confirmed.map(c => c.frauId));
+  const usedM = new Set(confirmed.map(c => c.mannId));
+  // Doppelmatch exits: person left, their match unknown → skip them
+  const dmF = new Set((doppelmatches||[]).filter(d=>d.gender==="frau").map(d=>d.personId));
+  const dmM = new Set((doppelmatches||[]).filter(d=>d.gender==="mann").map(d=>d.personId));
+
+  // Build candidates
+  const candidates = [];
+  frauen.forEach(f => {
+    if (usedF.has(f.id) || dmF.has(f.id)) return;
+    maenner.forEach(m => {
+      if (usedM.has(m.id) || dmM.has(m.id)) return;
+      const key = `${f.id}|${m.id}`;
+      const p = probs?.[key] ?? 0;
+      candidates.push({ frauId: f.id, mannId: m.id, prob: p, status: p === 0 ? "excluded" : "guess" });
+    });
+  });
+  candidates.sort((a, b) => b.prob - a.prob);
+
+  // Greedy max-weight matching
+  for (const c of candidates) {
+    if (!usedF.has(c.frauId) && !usedM.has(c.mannId) && c.prob > 0) {
+      result.push(c);
+      usedF.add(c.frauId);
+      usedM.add(c.mannId);
+    }
+  }
+  return result;
+}
+
+function BestGuess({ st, pd }) {
+  const { probs, confirmed } = pd;
+  if (!probs || Object.keys(probs).length === 0) return null;
+
+  const matches = bestGuessMatching(
+    st.teilnehmer.frauen, st.teilnehmer.maenner,
+    probs, confirmed || [], st.doppelmatches || []
+  );
+  if (matches.length === 0) return null;
+
+  const total = matches.length;
+  const avgConf = Math.round(matches.filter(m=>m.status!=="confirmed").reduce((s,m)=>s+m.prob,0) / Math.max(1,matches.filter(m=>m.status!=="confirmed").length));
+  const confident = matches.filter(m => m.prob >= 60 && m.status !== "confirmed").length;
+
+  return (
+    <Card sx={{ marginBottom: 14, border: `1.5px solid ${C.brd2}` }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
+        <div>
+          <div style={{ fontFamily: "'Cormorant Garamond',Georgia,serif", fontSize: 18, fontStyle: "italic", color: C.brown, fontWeight: 600 }}>Meine aktuelle Vermutung</div>
+          <div style={{ fontSize: 11, color: C.warm, marginTop: 2 }}>Basierend auf Night-Paarungen & Matchbox-Ergebnissen</div>
+        </div>
+        <div style={{ textAlign: "right" }}>
+          <div style={{ fontSize: 20, fontWeight: 700, color: C.pink }}>{avgConf}%</div>
+          <div style={{ fontSize: 10, color: C.warm }}>ø Konfidenz</div>
+        </div>
+      </div>
+
+      {matches.map((m, i) => {
+        const f = st.teilnehmer.frauen.find(x => x.id === m.frauId);
+        const ma = st.teilnehmer.maenner.find(x => x.id === m.mannId);
+        const isConf = m.status === "confirmed";
+        const col = isConf ? C.green : m.prob >= 60 ? C.pink : m.prob >= 35 ? C.gold : C.warm;
+        const bg  = isConf ? C.greenD : m.prob >= 60 ? C.pinkD : m.prob >= 35 ? C.goldD : "#f9f5ef";
+
+        return (
+          <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 12px", borderRadius: 12, background: bg, marginBottom: 6, border: `1px solid ${col}33` }}>
+            <div style={{ fontSize: 13, color: C.warm, fontWeight: 700, width: 20, flexShrink: 0, textAlign: "center" }}>{i+1}</div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 13, fontWeight: 700 }}>
+                <span style={{ color: C.pink }}>{f?.name?.split(" ")[0]}</span>
+                <span style={{ color: C.warm, margin: "0 6px" }}>+</span>
+                <span style={{ color: C.blue }}>{ma?.name?.split(" ")[0]}</span>
+              </div>
+              {!isConf && (
+                <div style={{ height: 4, borderRadius: 2, background: "rgba(0,0,0,0.08)", marginTop: 5 }}>
+                  <div style={{ height: "100%", width: `${m.prob}%`, background: col, borderRadius: 2, transition: "width 0.5s" }} />
+                </div>
+              )}
+            </div>
+            <div style={{ textAlign: "right", flexShrink: 0 }}>
+              {isConf
+                ? <span style={{ fontSize: 12, fontWeight: 700, color: C.green }}>✓ Match</span>
+                : <span style={{ fontSize: 16, fontWeight: 800, color: col }}>{m.prob}%</span>
+              }
+            </div>
+          </div>
+        );
+      })}
+
+      {matches.length < 10 && (
+        <div style={{ fontSize: 11, color: C.warm, textAlign: "center", marginTop: 6, fontStyle: "italic" }}>
+          {10 - matches.length} Paarung{10-matches.length>1?"en":""} noch offen – mehr Daten helfen!
+        </div>
+      )}
+      <div style={{ fontSize: 11, color: C.warm, textAlign: "center", marginTop: 8, padding: "8px 0 0", borderTop: `1px solid ${C.brd}`, fontStyle: "italic" }}>
+        💡 Je mehr Matchbox-Ergebnisse und Nights, desto präziser wird die Vermutung.
+      </div>
+    </Card>
+  );
+}
 
 /* ─── TOP PAARE ─── */
 function TopPaare({ st }) {
@@ -331,7 +439,7 @@ function TopPaare({ st }) {
 }
 
 /* ─── HOME ─── */
-function Home({ st, onShowOnboarding, setPage }) {
+function Home({ st, onShowOnboarding, setPage, pd }) {
   const conf = st.matchboxen.filter(m => m.ergebnis === "match");
   const lastNight = st.matchingNights[st.matchingNights.length - 1];
   const canAddNight = st.matchboxen.length > st.matchingNights.length || (st.matchingNights.length === 0 && st.matchboxen.length === 0);
@@ -353,13 +461,13 @@ function Home({ st, onShowOnboarding, setPage }) {
         <div style={{ display: "flex", justifyContent: "center", marginBottom: 12 }}>
           <AppIcon size={64} />
         </div>
-        <h1 style={{ fontFamily: "'Playfair Display',serif", fontSize: 26, margin: "0 0 4px", background: GR3(C.pink, "#ff8800", C.gold), WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", fontWeight: 700 }}>Are You The One</h1>
-        <p style={{ color: C.mut, fontSize: 12, margin: "0 0 12px" }}>Staffel 6 · Tracker von Sabrina</p>
+        <h1 style={{ fontFamily: "'Cormorant Garamond',Georgia,serif", fontSize: 26, margin: "0 0 4px", background: GR3(C.pink, "#ff8800", C.gold), WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", fontWeight: 700 }}>Are You The One</h1>
+        <p style={{ color: C.warm, fontSize: 12, margin: "0 0 12px", fontFamily: "'Cormorant Garamond',Georgia,serif", letterSpacing: "0.08em" }}>Staffel 6 &nbsp;·&nbsp; Von Sabrina</p>
         <button onClick={onShowOnboarding} style={{ background: "none", border: `1px solid ${C.brd}`, borderRadius: 99, padding: "4px 12px", fontSize: 11, color: C.mut, cursor: "pointer", fontFamily: "inherit" }}>❓ Anleitung</button>
       </div>
 
       {/* A) Nächster Schritt */}
-      <button onClick={() => setPage(nextStep.tab)} style={{ display: "flex", alignItems: "center", gap: 12, width: "100%", padding: "13px 16px", borderRadius: 16, background: `linear-gradient(135deg, ${nextStep.col}, ${nextStep.col}bb)`, border: "none", cursor: "pointer", marginBottom: 12, boxShadow: `0 4px 14px ${nextStep.col}40`, fontFamily: "inherit" }}>
+      <button onClick={() => setPage(nextStep.tab)} style={{ display: "flex", alignItems: "center", gap: 12, width: "100%", padding: "14px 18px", borderRadius: 14, background: LUXURY, border: "none", cursor: "pointer", marginBottom: 14, boxShadow: "0 4px 16px rgba(212,83,126,0.28)", fontFamily: "inherit" }}>
         <span style={{ fontSize: 28 }}>{nextStep.icon}</span>
         <div style={{ textAlign: "left" }}>
           <div style={{ fontSize: 11, color: "rgba(255,255,255,0.75)", fontWeight: 600, letterSpacing: "0.05em" }}>NÄCHSTER SCHRITT</div>
@@ -378,7 +486,7 @@ function Home({ st, onShowOnboarding, setPage }) {
         ].map(s => (
           <div key={s.lbl} style={{ background: `linear-gradient(145deg,#fff,${s.col}12)`, border: `1.5px solid ${s.col}33`, borderRadius: 14, padding: "10px 4px", textAlign: "center" }}>
             <div style={{ fontSize: 18 }}>{s.icon}</div>
-            <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 20, fontWeight: 700, color: s.col, lineHeight: 1 }}>{s.val}</div>
+            <div style={{ fontFamily: "'Cormorant Garamond',Georgia,serif", fontSize: 20, fontWeight: 700, color: s.col, lineHeight: 1 }}>{s.val}</div>
             <div style={{ fontSize: 10, color: C.mut, marginTop: 2 }}>{s.lbl}</div>
           </div>
         ))}
@@ -487,10 +595,14 @@ function MatchingNights({ st, setSt }) {
   const [waehler, setWaehler] = useState("frauen");
 
   const conf = st.matchboxen.filter(m => m.ergebnis === "match");
-  const cF = new Set(conf.map(m => m.frauId));
-  const cM = new Set(conf.map(m => m.mannId));
-  const aF = st.teilnehmer.frauen.filter(f => !cF.has(f.id));
-  const aM = st.teilnehmer.maenner.filter(m => !cM.has(m.id));
+  const dmExits = st.doppelmatches || [];
+  const dmFIds = new Set(dmExits.filter(d => d.gender === "frau").map(d => d.personId));
+  const dmMIds = new Set(dmExits.filter(d => d.gender === "mann").map(d => d.personId));
+  const cF = new Set([...conf.map(m => m.frauId), ...dmFIds]);
+  const cM = new Set([...conf.map(m => m.mannId), ...dmMIds]);
+  const currentNightNr = st.matchingNights.length + 1;
+  const aF = st.teilnehmer.frauen.filter(f => !cF.has(f.id) && !(f.eintrittNachNight >= currentNightNr));
+  const aM = st.teilnehmer.maenner.filter(m => !cM.has(m.id) && !(m.eintrittNachNight >= currentNightNr));
   const choosers = waehler === "frauen" ? aF : aM;
   const pool = waehler === "frauen" ? aM : aF;
   const pickedPool = new Set(Object.values(paare).filter(Boolean));
@@ -520,7 +632,7 @@ function MatchingNights({ st, setSt }) {
           <Card key={night.id} sx={{ marginBottom: 10 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: night.paarungen.length ? 8 : 0 }}>
               <div>
-                <span style={{ fontFamily: "'Playfair Display',serif", fontSize: 16 }}>🌙 Night {night.nummer}</span>
+                <span style={{ fontFamily: "'Cormorant Garamond',Georgia,serif", fontSize: 16 }}>🌙 Night {night.nummer}</span>
                 <span style={{ marginLeft: 7, fontSize: 11, color: C.mut }}>{night.waehler === "frauen" ? "Frauen wählen" : "Männer wählen"}</span>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -560,7 +672,7 @@ function MatchingNights({ st, setSt }) {
         </Btn>
       ) : (
         <Card acc={`${C.pink}44`}>
-          <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 19, marginBottom: 12 }}>
+          <div style={{ fontFamily: "'Cormorant Garamond',Georgia,serif", fontSize: 19, marginBottom: 12 }}>
             🌙 Night {st.matchingNights.length + 1}
           </div>
 
@@ -625,6 +737,21 @@ function MatchingNights({ st, setSt }) {
             })}
           </div>
 
+          {/* Confirmed matches still count as lights */}
+          {conf.length > 0 && (
+            <div style={{ marginBottom: 14, padding: "10px 14px", background: C.greenD, borderRadius: 12, border: `1px solid ${C.green}44` }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: C.green, marginBottom: 6 }}>✅ Ausgezogene Paare – leuchten weiterhin ({conf.length} Licht{conf.length>1?"er":""})</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
+                {conf.map(mb => {
+                  const f = st.teilnehmer.frauen.find(x => x.id === mb.frauId);
+                  const m = st.teilnehmer.maenner.find(x => x.id === mb.mannId);
+                  return <span key={mb.id} style={{ fontSize: 12, padding: "3px 10px", borderRadius: 99, background: "#b8f0d8", color: "#005c38", fontWeight: 600, border: "1px solid #00906a33" }}>
+                    {f?.name?.split(" ")[0]} + {m?.name?.split(" ")[0]}
+                  </span>;
+                })}
+              </div>
+            </div>
+          )}
           <div style={{ display: "flex", gap: 8 }}>
             <Btn onClick={save} dis={lichter === ""}>Speichern</Btn>
             <Btn onClick={() => { setOpen(false); setLichter(""); setPaare({}); }} v="ghost">Abbrechen</Btn>
@@ -691,7 +818,7 @@ function Matchboxen({ st, setSt }) {
         <Btn onClick={() => setOpen(true)} dis={!aF.length || !aM.length}>＋ Matchbox eintragen</Btn>
       ) : (
         <Card acc={`${C.gold}66`}>
-          <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 20, marginBottom: 18 }}>📦 Neue Matchbox</div>
+          <div style={{ fontFamily: "'Cormorant Garamond',Georgia,serif", fontSize: 20, marginBottom: 18 }}>📦 Neue Matchbox</div>
           <Field label="Frau"><Sel val={fId} set={v => { setFId(v); setMId(""); }}>
             <option value="">– Frau wählen –</option>
             {aF.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
@@ -750,7 +877,7 @@ function Matchboxen({ st, setSt }) {
 }
 
 /* ─── KREUZTABELLE ─── */
-function Kreuztabelle({ frauen, maenner, pairCounts, mbStatus, annahmen = [], nightExclSet = new Set(), onToggle, interactive = false }) {
+function Kreuztabelle({ frauen, maenner, pairCounts, mbStatus, annahmen = [], nightExclSet = new Set(), dmExitIds = new Set(), onToggle, interactive = false }) {
   const annSet = new Set(annahmen.map(a => `${a.frauId}|${a.mannId}`));
 
   // Confirmed real matches
@@ -780,8 +907,11 @@ function Kreuztabelle({ frauen, maenner, pairCounts, mbStatus, annahmen = [], ni
       return { bg: "#eeeeee", col: "#aaaaaa", brd: "#cccccc", txt: "✕", dim: true, click: false };
 
     // Diese Zelle IST die Annahme
-    if (interactive && isAnn)
+    if (interactive && isAnn) {
+      const aTyp = annahmen.find(a => a.frauId===fId&&a.mannId===mId)?.typ;
+      if (aTyp === "kein_match") return { bg: "#ffc0c8", col: "#9a0018", brd: "#d4001e", txt: "✗", dim: false, click: true };
       return { bg: "#e0c8ff", col: "#5500aa", brd: "#7a00cc", txt: "★", dim: false, click: true };
+    }
 
     // Frau/Mann durch Annahme vergeben → ausgelöscht
     if (interactive && (annFrau[fId] || annMann[mId]))
@@ -813,29 +943,42 @@ function Kreuztabelle({ frauen, maenner, pairCounts, mbStatus, annahmen = [], ni
         <div style={{ display: "flex", marginBottom: 3 }}>
           <div style={{ width: NW, flexShrink: 0 }} />
           {maenner.map(m => (
-            <div key={m.id} style={{ width: W, flexShrink: 0, textAlign: "center", fontSize: 9, fontWeight: 700, color: matchedMann[m.id] ? "#aaa" : C.blue, padding: "2px 1px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", textDecoration: matchedMann[m.id] ? "line-through" : "none" }}>
+            <div key={m.id} style={{ width: W, flexShrink: 0, textAlign: "center", fontSize: 9, fontWeight: 700,
+              color: dmExitIds.has(m.id) ? "#ccc" : matchedMann[m.id] ? "#aaa" : C.blue,
+              padding: "2px 1px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+              textDecoration: (matchedMann[m.id] || dmExitIds.has(m.id)) ? "line-through" : "none",
+              opacity: dmExitIds.has(m.id) ? 0.4 : 1 }}>
               {firstName(m.name)}
             </div>
           ))}
         </div>
         {/* Rows */}
-        {frauen.map(f => (
-          <div key={f.id} style={{ display: "flex", marginBottom: 2 }}>
-            <div style={{ width: NW, flexShrink: 0, fontSize: 9, fontWeight: 700, color: matchedFrau[f.id] ? "#aaa" : C.pink, textAlign: "right", paddingRight: 5, display: "flex", alignItems: "center", justifyContent: "flex-end", textDecoration: matchedFrau[f.id] ? "line-through" : "none", overflow: "hidden", whiteSpace: "nowrap" }}>
+        {frauen.map(f => {
+          const isDmExitRow = dmExitIds.has(f.id);
+          return (
+          <div key={f.id} style={{ display: "flex", marginBottom: 2, opacity: isDmExitRow ? 0.38 : 1 }}>
+            <div style={{ width: NW, flexShrink: 0, fontSize: 9, fontWeight: 700,
+              color: isDmExitRow ? "#bbb" : matchedFrau[f.id] ? "#aaa" : C.pink,
+              textAlign: "right", paddingRight: 5, display: "flex", alignItems: "center", justifyContent: "flex-end",
+              textDecoration: (matchedFrau[f.id] || isDmExitRow) ? "line-through" : "none",
+              overflow: "hidden", whiteSpace: "nowrap" }}>
               {firstName(f.name)}
             </div>
             {maenner.map(m => {
-              const c = getCell(f.id, m.id);
+              const isDmExitCol = dmExitIds.has(m.id);
+              const c = (isDmExitRow || isDmExitCol)
+                ? { bg: "#f5f5f5", col: "#ccc", brd: "#e0e0e0", txt: "", dim: true, click: false }
+                : getCell(f.id, m.id);
               return (
                 <div key={m.id}
-                  onClick={() => c.click && !c.dim && onToggle && onToggle(f.id, m.id)}
-                  style={{ width: W - 2, height: W - 2, flexShrink: 0, margin: "0 1px", borderRadius: 5, background: c.bg, border: `1px solid ${c.brd}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, color: c.col, cursor: c.click && !c.dim ? "pointer" : "default", userSelect: "none", opacity: c.dim ? 0.5 : 1 }}>
+                  onClick={() => c.click && !c.dim && !isDmExitRow && !isDmExitCol && onToggle && onToggle(f.id, m.id)}
+                  style={{ width: W - 2, height: W - 2, flexShrink: 0, margin: "0 1px", borderRadius: 5, background: c.bg, border: `1px solid ${c.brd}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, color: c.col, cursor: c.click && !c.dim ? "pointer" : "default", userSelect: "none", opacity: c.dim ? 0.4 : 1 }}>
                   {c.txt}
                 </div>
               );
             })}
           </div>
-        ))}
+        );})}
       </div>
     </div>
   );
@@ -944,11 +1087,19 @@ function Analyse({ st, setSt, pd }) {
   const [expGender, setExpGender] = useState("frauen");
 
   const annahmen = st.annahmen || [];
-  const toggleAnnahme = (frauId, mannId) => {
+  const toggleAnnahme = (frauId, mannId, forcTyp) => {
     setSt(s => {
       const ann = s.annahmen || [];
-      const exists = ann.some(a => a.frauId === frauId && a.mannId === mannId);
-      return { ...s, annahmen: exists ? ann.filter(a => !(a.frauId === frauId && a.mannId === mannId)) : [...ann, { frauId, mannId }] };
+      const existing = ann.find(a => a.frauId === frauId && a.mannId === mannId);
+      if (forcTyp) {
+        // from Night-Check: cycle neutral→match→kein_match→neutral
+        if (!existing) return { ...s, annahmen: [...ann, { frauId, mannId, typ: "match" }] };
+        if (existing.typ === "match") return { ...s, annahmen: ann.map(a => a.frauId===frauId&&a.mannId===mannId ? {...a,typ:"kein_match"} : a) };
+        return { ...s, annahmen: ann.filter(a => !(a.frauId===frauId&&a.mannId===mannId)) };
+      }
+      // from Experiment tab: toggle match on/off
+      if (!existing) return { ...s, annahmen: [...ann, { frauId, mannId, typ: "match" }] };
+      return { ...s, annahmen: ann.filter(a => !(a.frauId===frauId&&a.mannId===mannId)) };
     });
   };
   const clearAnnahmen = () => setSt(s => ({ ...s, annahmen: [] }));
@@ -976,10 +1127,13 @@ function Analyse({ st, setSt, pd }) {
     const M = st.matchboxen.filter(mb => mb.ergebnis === "match").length;
     const confF = new Set(st.matchboxen.filter(mb => mb.ergebnis === "match").map(mb => mb.frauId));
     const confM = new Set(st.matchboxen.filter(mb => mb.ergebnis === "match").map(mb => mb.mannId));
+    const dmF = new Set((st.doppelmatches || []).filter(d => d.gender === "frau").map(d => d.personId));
+    const dmM = new Set((st.doppelmatches || []).filter(d => d.gender === "mann").map(d => d.personId));
     st.matchingNights.forEach(night => {
       if ((night.lichter - M) <= 0) {
         (night.paarungen || []).forEach(p => {
-          if (!confF.has(p.frauId) && !confM.has(p.mannId)) s.add(`${p.frauId}|${p.mannId}`);
+          if (!confF.has(p.frauId) && !confM.has(p.mannId) && !dmF.has(p.frauId) && !dmM.has(p.mannId))
+            s.add(`${p.frauId}|${p.mannId}`);
         });
       }
     });
@@ -990,6 +1144,9 @@ function Analyse({ st, setSt, pd }) {
   const { probs, aF, aM, confirmed, impossible } = pd;
   const cF = new Set((confirmed || []).map(m => m.frauId));
   const cM = new Set((confirmed || []).map(m => m.mannId));
+  // Doppelmatch-Exits auch aus aktiver Ansicht ausschliessen
+  const dmEx = st.doppelmatches || [];
+  dmEx.forEach(d => { if (d.gender === "frau") cF.add(d.personId); else cM.add(d.personId); });
   const people = gender === "frauen" ? frauen : maenner;
   const expPeople = expGender === "frauen" ? frauen : maenner;
   const cps = gender === "frauen" ? aM : aF;
@@ -1031,18 +1188,22 @@ function Analyse({ st, setSt, pd }) {
           <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 7, marginBottom: 14 }}>
             {people.map(p => {
               const active = gender === "frauen" ? !cF.has(p.id) : !cM.has(p.id);
+              const isDm = dmEx.some(d => d.personId === p.id && d.gender === (gender === "frauen" ? "frau" : "mann"));
+              const isMatch = !isDm && !active;
               const isSel = sel === p.id;
               const col = gender === "frauen" ? C.pink : C.blue;
-              return <button key={p.id} onClick={() => setSel(p.id === sel ? null : p.id)} style={{ padding: "12px 4px 10px", borderRadius: 13, cursor: "pointer", fontFamily: "inherit", textAlign: "center", border: `2px solid ${isSel ? col : (!active ? `${C.green}55` : C.brd)}`, background: isSel ? `${col}12` : (!active ? C.greenD : C.surf), transition: "all 0.18s", boxShadow: isSel ? "0 2px 8px rgba(0,0,0,0.1)" : "none" }}>
+              return <button key={p.id} onClick={() => active && !isDm && setSel(p.id === sel ? null : p.id)} style={{ padding: "12px 4px 10px", borderRadius: 13, cursor: active && !isDm ? "pointer" : "default", fontFamily: "inherit", textAlign: "center", border: `2px solid ${isSel ? col : (isMatch ? `${C.green}55` : isDm ? `${C.pink}33` : C.brd)}`, background: isSel ? `${col}12` : (isMatch ? C.greenD : isDm ? "#fff0f5" : C.surf), transition: "all 0.18s", boxShadow: isSel ? "0 2px 8px rgba(0,0,0,0.1)" : "none", opacity: isDm ? 0.5 : 1 }}>
                 <div style={{ fontSize: 22, marginBottom: 4 }}>{gender === "frauen" ? "👩" : "👨"}</div>
                 <div style={{ fontSize: 11, fontWeight: isSel ? 700 : 500, color: isSel ? col : C.txt, lineHeight: 1.2 }}>{p.name.split(" ")[0]}</div>
-                {!active && <div style={{ fontSize: 9, color: C.green, marginTop: 2, fontWeight: 700 }}>✅</div>}
+                {isMatch && <div style={{ fontSize: 9, color: C.green, marginTop: 2, fontWeight: 700 }}>✅</div>}
+                {isDm && <div style={{ fontSize: 9, color: C.pink, marginTop: 2, fontWeight: 700 }}>💔 out</div>}
+                {!isMatch && !isDm && p.eintrittNachNight && <div style={{ fontSize: 9, color: C.purple, marginTop: 2, fontWeight: 700 }}>🆕 N{p.eintrittNachNight + 1}</div>}
               </button>;
             })}
           </div>
           {sel ? (
             <Card acc={`${gender === "frauen" ? C.pink : C.blue}44`}>
-              <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 16, marginBottom: 12 }}>
+              <div style={{ fontFamily: "'Cormorant Garamond',Georgia,serif", fontSize: 16, marginBottom: 12 }}>
                 {gender === "frauen" ? "👩" : "👨"} {people.find(p => p.id === sel)?.name}
               </div>
               <ProbBars probs={probs} prevProbs={pdPrev?.probs} cps={cps} sel={sel} gender={gender} confirmed={confirmed} cF={cF} cM={cM} teilnehmer={st.teilnehmer} matchboxen={st.matchboxen} matchingNights={st.matchingNights} />
@@ -1096,7 +1257,7 @@ function Analyse({ st, setSt, pd }) {
           </div>
 
           <Card sx={{ padding: 12, marginBottom: 14 }}>
-            <Kreuztabelle frauen={frauen} maenner={maenner} pairCounts={pairCounts} mbStatus={mbStatus} annahmen={annahmen} nightExclSet={nightExclSet} onToggle={toggleAnnahme} interactive />
+            <Kreuztabelle frauen={frauen} maenner={maenner} pairCounts={pairCounts} mbStatus={mbStatus} annahmen={annahmen} nightExclSet={nightExclSet} dmExitIds={new Set(dmEx.map(d => d.personId))} onToggle={toggleAnnahme} interactive />
           </Card>
 
           {annahmen.length > 0 && (
@@ -1106,8 +1267,8 @@ function Analyse({ st, setSt, pd }) {
                 {annahmen.map(a => {
                   const f = frauen.find(x => x.id === a.frauId);
                   const m = maenner.find(x => x.id === a.mannId);
-                  return <span key={`${a.frauId}|${a.mannId}`} onClick={() => toggleAnnahme(a.frauId, a.mannId)} style={{ fontSize: 11, padding: "3px 8px", borderRadius: 99, background: "#fff", color: C.purple, border: `1px solid ${C.purple}55`, cursor: "pointer", fontWeight: 600 }}>
-                    {f?.name?.split(" ")[0]} + {m?.name?.split(" ")[0]} ×
+                  return <span key={`${a.frauId}|${a.mannId}`} onClick={() => toggleAnnahme(a.frauId, a.mannId)} style={{ fontSize: 11, padding: "3px 8px", borderRadius: 99, background: a.typ==="kein_match" ? "#ffc0c8" : "#fff", color: a.typ==="kein_match" ? "#9a0018" : C.purple, border: `1px solid ${a.typ==="kein_match" ? "#d4001e" : C.purple}55`, cursor: "pointer", fontWeight: 600 }}>
+                    {a.typ==="kein_match" ? "✗ " : "★ "}{f?.name?.split(" ")[0]} + {m?.name?.split(" ")[0]} ×
                   </span>;
                 })}
               </div>
@@ -1136,7 +1297,7 @@ function Analyse({ st, setSt, pd }) {
               </div>
               {expSel && (
                 <Card acc={`${C.purple}44`}>
-                  <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 15, marginBottom: 12, color: C.purple }}>
+                  <div style={{ fontFamily: "'Cormorant Garamond',Georgia,serif", fontSize: 15, marginBottom: 12, color: C.purple }}>
                     {expPeople.find(p => p.id === expSel)?.name} – Hypothetisch
                   </div>
                   <ProbBars probs={pdExp.probs} prevProbs={null} cps={expCps} sel={expSel} gender={expGender} confirmed={pdExp.confirmed} cF={new Set(pdExp.confirmed.map(c => c.frauId))} cM={new Set(pdExp.confirmed.map(c => c.mannId))} teilnehmer={st.teilnehmer} matchboxen={st.matchboxen} matchingNights={st.matchingNights} />
@@ -1182,7 +1343,7 @@ function Analyse({ st, setSt, pd }) {
               return (
                 <div key={night.id} style={{ background: "#fff", border: `1.5px solid ${statusCol}44`, borderRadius: 16, padding: 16, marginBottom: 14, boxShadow: "0 2px 8px rgba(0,0,0,0.06)" }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-                    <span style={{ fontFamily: "'Playfair Display',serif", fontSize: 17 }}>🌙 Night {night.nummer}</span>
+                    <span style={{ fontFamily: "'Cormorant Garamond',Georgia,serif", fontSize: 17 }}>🌙 Night {night.nummer}</span>
                     <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
                       <Pill col={C.gold}>💡 {night.lichter}</Pill>
                       <Pill col={statusCol}>{statusLbl}</Pill>
@@ -1211,22 +1372,27 @@ function Analyse({ st, setSt, pd }) {
                       const isAnn = annahmen.some(a => a.frauId === p.frauId && a.mannId === p.mannId);
                       const isElim = (correctNeeded === 0 || (allFound && !isAnn && !isConf)) && !isKein;
                       const clickable = !isConf && !isKein;
-                      let icon, bg, col;
-                      if (isConf)      { icon = "✓"; bg = "#b8f0d8"; col = "#005c38"; }
-                      else if (isKein) { icon = "✗"; bg = "#ffc0c8"; col = "#9a0018"; }
-                      else if (isAnn)  { icon = "★"; bg = "#e0c8ff"; col = "#5500aa"; }
-                      else if (isElim) { icon = "–"; bg = "#ffdde2"; col = "#c0003a"; }
-                      else             { icon = "?"; bg = "#f5f5f5"; col = C.mut; }
+                      // 3-state: neutral→★match→✗kein_match→neutral
+                      const annTyp = annahmen.find(a => a.frauId===p.frauId&&a.mannId===p.mannId)?.typ;
+                      const isAnnMatch = isAnn && annTyp === "match";
+                      const isAnnKein  = isAnn && annTyp === "kein_match";
+                      let icon, bg, col, hint;
+                      if (isConf)       { icon="✓"; bg="#b8f0d8"; col="#005c38"; hint=""; }
+                      else if (isKein)  { icon="✗"; bg="#ffc0c8"; col="#9a0018"; hint=""; }
+                      else if (isAnnMatch){ icon="★"; bg="#e8f5ff"; col="#0060b0"; hint="2× = Kein Match"; }
+                      else if (isAnnKein){ icon="✗"; bg="#ffc0c8"; col="#9a0018"; hint="3× = Neutral"; }
+                      else if (isElim)  { icon="–"; bg="#ffdde2"; col="#c0003a"; hint=""; }
+                      else              { icon="?"; bg="#f9f9f9"; col=C.mut; hint="1× = Match-Annahme"; }
                       return (
-                        <div key={i} onClick={() => clickable && toggleAnnahme(p.frauId, p.mannId)}
-                          style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 12px", borderRadius: 10, background: bg, cursor: clickable ? "pointer" : "default", border: `1px solid ${col}33` }}>
+                        <div key={i} onClick={() => clickable && toggleAnnahme(p.frauId, p.mannId, true)}
+                          style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 12px", borderRadius: 10, background: bg, cursor: clickable ? "pointer" : "default", border: `1px solid ${col}33`, transition: "all 0.15s" }}>
                           <div style={{ width: 26, height: 26, borderRadius: 99, background: `${col}22`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 800, color: col, flexShrink: 0 }}>{icon}</div>
                           <div style={{ flex: 1, fontSize: 13, fontWeight: 600 }}>
                             <span style={{ color: C.pink }}>{f?.name}</span>
                             <span style={{ color: C.mut, margin: "0 6px" }}>+</span>
                             <span style={{ color: C.blue }}>{m?.name}</span>
                           </div>
-                          {clickable && <div style={{ fontSize: 10, color: col, opacity: 0.8 }}>{isAnn ? "× entfernen" : "+ Annahme"}</div>}
+                          {clickable && hint && <div style={{ fontSize: 10, color: col, opacity: 0.65 }}>{hint}</div>}
                         </div>
                       );
                     })}
@@ -1251,6 +1417,14 @@ function Daten({ st, setSt }) {
   const exp = () => { const b = new Blob([JSON.stringify(st, null, 2)], { type: "application/json" }); const a = document.createElement("a"); a.href = URL.createObjectURL(b); a.download = `perfect-match-s6-${new Date().toISOString().slice(0, 10)}.json`; a.click(); };
   const imp = e => { const f = e.target.files[0]; if (!f) return; const r = new FileReader(); r.onload = ev => { try { setSt(JSON.parse(ev.target.result)); } catch { alert("Ungültige JSON-Datei."); } }; r.readAsText(f); e.target.value = ""; };
   const diff = st.teilnehmer.frauen.length - st.teilnehmer.maenner.length;
+  const setEintritt = (g, id, val) => setSt(s => ({
+    ...s,
+    teilnehmer: {
+      ...s.teilnehmer,
+      [g]: s.teilnehmer[g].map(p => p.id === id ? { ...p, eintrittNachNight: val === "" ? undefined : +val } : p)
+    }
+  }));
+
   const ColSetup = ({ g, col, icon, v, sv }) => (
     <Card sx={{ flex: 1, padding: 14 }}>
       <div style={{ fontSize: 12, fontWeight: 700, color: col, marginBottom: 10 }}>{icon} {g === "frauen" ? "Frauen" : "Männer"} ({st.teilnehmer[g].length})</div>
@@ -1258,11 +1432,27 @@ function Daten({ st, setSt }) {
         <Inp val={v} set={sv} ph="Name…" sx={{ flex: 1, padding: "7px 10px", fontSize: 13 }} />
         <Btn onClick={() => addP(g, v, sv)} sm sx={{ flexShrink: 0, padding: "7px 11px" }}>＋</Btn>
       </div>
-      <div style={{ maxHeight: 180, overflowY: "auto" }}>
+      <div style={{ maxHeight: 220, overflowY: "auto" }}>
         {st.teilnehmer[g].map(p => (
-          <div key={p.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "4px 8px", borderRadius: 7, background: `${col}0d`, marginBottom: 3, border: `1px solid ${col}22` }}>
-            <span style={{ fontSize: 12 }}>{p.name}</span>
-            <button onClick={() => rmP(g, p.id)} style={{ background: "none", border: "none", color: C.mut, cursor: "pointer", fontSize: 16, lineHeight: 1, padding: "0 2px" }}>×</button>
+          <div key={p.id} style={{ marginBottom: 5 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "5px 8px", borderRadius: 7, background: p.eintrittNachNight ? `${C.purple}0d` : `${col}0d`, border: `1px solid ${p.eintrittNachNight ? C.purple : col}22` }}>
+              <div>
+                <span style={{ fontSize: 12, fontWeight: 600 }}>{p.name}</span>
+                {p.eintrittNachNight && <span style={{ fontSize: 10, color: C.purple, marginLeft: 5, fontWeight: 700 }}>🆕 ab Night {p.eintrittNachNight + 1}</span>}
+              </div>
+              <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+                <select
+                  value={p.eintrittNachNight ?? ""}
+                  onChange={e => setEintritt(g, p.id, e.target.value)}
+                  style={{ fontSize: 10, border: `1px solid ${C.brd}`, borderRadius: 5, padding: "2px 4px", background: "#fff", color: C.mut, cursor: "pointer" }}
+                  title="Eintritt nach Night..."
+                >
+                  <option value="">Anfang</option>
+                  {[1,2,3,4,5,6,7,8,9].map(n => <option key={n} value={n}>nach Night {n}</option>)}
+                </select>
+                <button onClick={() => rmP(g, p.id)} style={{ background: "none", border: "none", color: C.mut, cursor: "pointer", fontSize: 16, lineHeight: 1, padding: "0 2px" }}>×</button>
+              </div>
+            </div>
           </div>
         ))}
       </div>
@@ -1329,7 +1519,7 @@ function Daten({ st, setSt }) {
       <div style={{ marginTop: 24, borderTop: `1px solid ${C.brd}`, paddingTop: 20 }}>
         <div style={{ textAlign: "center", marginBottom: 16 }}>
           <div style={{ display: "flex", justifyContent: "center", marginBottom: 8 }}><AppIcon size={44} /></div>
-          <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 18, background: GR3(C.pink, "#ff7700", C.gold), WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", fontWeight: 700 }}>Über diese App</div>
+          <div style={{ fontFamily: "'Cormorant Garamond',Georgia,serif", fontSize: 18, background: GR3(C.pink, "#ff7700", C.gold), WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", fontWeight: 700 }}>Über diese App</div>
         </div>
         <Card sx={{ marginBottom: 10 }}>
           <div style={{ fontWeight: 700, fontSize: 14, color: C.pink, marginBottom: 10 }}>👋 Hallo, ich bin Sabrina!</div>
@@ -1414,7 +1604,7 @@ function Onboarding({ onDone }) {
     <div style={{ position: "fixed", inset: 0, zIndex: 200, background: "rgba(245,242,251,0.98)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "24px 24px 40px" }}>
       {/* Progress bar */}
       <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 5, background: "#ffe8ee" }}>
-        <div style={{ height: "100%", width: `${progress * 100}%`, background: GR3(C.pink, "#ff8800", C.gold), transition: "width 0.4s ease", borderRadius: "0 3px 3px 0" }} />
+        <div style={{ height: "100%", width: `${progress * 100}%`, background: LUXURY, transition: "width 0.4s ease", borderRadius: "0 3px 3px 0" }} />
       </div>
 
       {/* Step counter */}
@@ -1425,7 +1615,7 @@ function Onboarding({ onDone }) {
         <div style={{ display: "flex", justifyContent: "center", marginBottom: 20 }}>
           {step === 0 ? <AppIcon size={72} /> : <div style={{ fontSize: 56, lineHeight: 1 }}>{s.icon}</div>}
         </div>
-        <h2 style={{ fontFamily: "'Playfair Display',serif", fontSize: 24, marginBottom: 14, color: C.txt, lineHeight: 1.2 }}>{s.title}</h2>
+        <h2 style={{ fontFamily: "'Cormorant Garamond',Georgia,serif", fontSize: 24, marginBottom: 14, color: C.txt, lineHeight: 1.2 }}>{s.title}</h2>
         <p style={{ fontSize: 15, color: C.mut, lineHeight: 1.7, marginBottom: s.hint ? 20 : 0 }}>{s.desc}</p>
 
         {s.hint && (
@@ -1467,7 +1657,7 @@ function Impressum({ st, setSt }) {
     <div>
       <div style={{ textAlign: "center", padding: "20px 0 24px" }}>
         <div style={{ fontSize: 48, lineHeight: 1, marginBottom: 12 }}>💕</div>
-        <h1 style={{ fontFamily: "'Playfair Display',serif", fontSize: 24, margin: "0 0 6px", background: GR3(C.pink, "#ff7700", C.gold), WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>Über diese App</h1>
+        <h1 style={{ fontFamily: "'Cormorant Garamond',Georgia,serif", fontSize: 24, margin: "0 0 6px", background: GR3(C.pink, "#ff7700", C.gold), WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>Über diese App</h1>
         <p style={{ color: C.mut, fontSize: 13 }}>Gemacht mit Leidenschaft für Reality TV</p>
       </div>
 
@@ -1553,7 +1743,7 @@ export default function App() {
   const [page, setPage] = useState("home");
   const pd = useMemo(() => calcProbs(st.teilnehmer.frauen, st.teilnehmer.maenner, st.matchboxen, st.matchingNights, [], st.doppelmatches || []), [st]);
   const pages = {
-    home: <Home st={st} onShowOnboarding={() => setSt(s => ({ ...s, onboardingDone: false }))} setPage={setPage} />,
+    home: <Home st={st} onShowOnboarding={() => setSt(s => ({ ...s, onboardingDone: false }))} setPage={setPage} pd={pd} />,
     nights: <MatchingNights st={st} setSt={setSt} />,
     matchbox: <Matchboxen st={st} setSt={setSt} />,
     analyse: <Analyse st={st} setSt={setSt} pd={pd} />,
@@ -1563,41 +1753,39 @@ export default function App() {
     <>
       {!st.onboardingDone && <Onboarding onDone={() => setSt(s => ({ ...s, onboardingDone: true }))} />}
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,600;0,700;1,400;1,600&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap');
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-        body { background: #fdf4f7; -webkit-font-smoothing: antialiased; }
+        body { background: #fef9f0; -webkit-font-smoothing: antialiased; }
         input, select, button, textarea { font-family: 'Plus Jakarta Sans', sans-serif; }
-        input::placeholder { color: rgba(15,0,16,0.28); }
-        select option { background: #fff; color: #0f0010; }
+        input::placeholder { color: rgba(42,21,0,0.28); }
+        select option { background: #fffdf7; color: #2a1500; }
         ::-webkit-scrollbar { width: 3px; }
-        ::-webkit-scrollbar-thumb { background: rgba(255,31,114,0.25); border-radius: 2px; }
-        @keyframes fadeUp { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:translateY(0); } }
-        @keyframes pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(255,31,114,0.4); } 50% { box-shadow: 0 0 0 8px rgba(255,31,114,0); } }
-        @keyframes shimmer { 0% { background-position: -200% center; } 100% { background-position: 200% center; } }
-        .fade-up { animation: fadeUp 0.35s ease both; }
+        ::-webkit-scrollbar-thumb { background: rgba(212,83,126,0.25); border-radius: 2px; }
+        @keyframes fadeUp { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
+        .fade-up { animation: fadeUp 0.3s ease both; }
       `}</style>
       <div style={{ minHeight: "100vh", background: MESH, color: C.txt, fontFamily: "'Plus Jakarta Sans',sans-serif", maxWidth: 520, margin: "0 auto" }}>
+
         {/* Sticky Header */}
-        <div style={{ position: "sticky", top: 0, zIndex: 50, padding: "12px 18px", background: "rgba(253,244,247,0.88)", backdropFilter: "blur(24px) saturate(180%)", borderBottom: `1px solid rgba(255,31,114,0.10)`, boxShadow: "0 1px 0 rgba(255,255,255,0.8), 0 4px 20px rgba(255,31,114,0.06)", display: "flex", alignItems: "center", gap: 10 }}>
-          <AppIcon size={30} />
+        <div style={{ position: "sticky", top: 0, zIndex: 50, padding: "11px 18px", background: "rgba(254,249,240,0.94)", backdropFilter: "blur(20px)", borderBottom: `1px solid ${C.brd}`, boxShadow: "0 1px 0 rgba(255,255,255,0.95)", display: "flex", alignItems: "center", gap: 10 }}>
+          <AppIcon size={28} />
           <div style={{ flex: 1 }}>
-            <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 17, background: GR3(C.pink, "#f97316", C.gold), WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", fontWeight: 700, lineHeight: 1.1 }}>Are You The One</div>
-            <div style={{ fontSize: 10, color: C.mut, letterSpacing: "0.06em", fontWeight: 600 }}>STAFFEL 6</div>
+            <div style={{ fontFamily: "'Cormorant Garamond',Georgia,serif", fontSize: 18, color: C.brown, fontWeight: 600, fontStyle: "italic", lineHeight: 1.1 }}>Are You The One</div>
           </div>
+          <div style={{ fontSize: 10, color: C.warm, letterSpacing: "0.10em", fontWeight: 600 }}>STAFFEL 6</div>
         </div>
 
         {/* Page Content */}
         <div style={{ padding: "20px 16px 110px" }}>{pages[page]}</div>
 
-        {/* Bottom Nav */}
-        <div style={{ position: "fixed", bottom: 0, left: "50%", transform: "translateX(-50%)", width: "100%", maxWidth: 520, background: "rgba(253,244,247,0.92)", backdropFilter: "blur(24px) saturate(180%)", borderTop: `1px solid rgba(255,31,114,0.08)`, boxShadow: "0 -1px 0 rgba(255,255,255,0.9), 0 -8px 24px rgba(0,0,0,0.06)", display: "flex", padding: "10px 4px 18px", gap: 2 }}>
+        {/* Bottom Nav – luxury bar */}
+        <div style={{ position: "fixed", bottom: 0, left: "50%", transform: "translateX(-50%)", width: "100%", maxWidth: 520, background: "rgba(254,249,240,0.96)", backdropFilter: "blur(20px)", borderTop: `1px solid ${C.brd}`, display: "flex", padding: "9px 8px 18px", gap: 4 }}>
           {NAV.map(n => {
             const on = page === n.id;
             return (
-              <button key={n.id} onClick={() => setPage(n.id)} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 3, padding: "6px 2px", background: "none", border: "none", cursor: "pointer", position: "relative" }}>
-                {on && <div style={{ position: "absolute", top: 0, left: "50%", transform: "translateX(-50%)", width: 32, height: 32, borderRadius: "50%", background: C.pinkD, filter: "blur(8px)" }} />}
-                <span style={{ fontSize: 20, lineHeight: 1, filter: on ? `drop-shadow(0 2px 6px ${C.pinkGlow})` : "none", transition: "all 0.2s", transform: on ? "scale(1.12)" : "scale(1)" }}>{n.icon}</span>
-                <span style={{ fontSize: 10, fontWeight: on ? 800 : 500, color: on ? C.pink : C.mut, letterSpacing: "0.02em", transition: "color 0.2s" }}>{n.lbl}</span>
+              <button key={n.id} onClick={() => setPage(n.id)} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 3, padding: "5px 2px", background: on ? `${C.pink}0d` : "none", borderRadius: 10, border: on ? `1px solid ${C.pink}22` : "1px solid transparent", cursor: "pointer", transition: "all 0.18s" }}>
+                <span style={{ fontSize: 18, lineHeight: 1, opacity: on ? 1 : 0.55, transition: "opacity 0.18s" }}>{n.icon}</span>
+                <span style={{ fontSize: 9, fontWeight: on ? 700 : 500, color: on ? C.pink : C.warm, letterSpacing: "0.04em", fontFamily: "'Plus Jakarta Sans',sans-serif", transition: "color 0.18s" }}>{n.lbl.toUpperCase()}</span>
               </button>
             );
           })}
