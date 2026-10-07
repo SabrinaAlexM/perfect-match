@@ -686,7 +686,20 @@ function MatchingNights({ st, setSt }) {
                   ) : null;
                 })()}
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
-
+                  {/* Ausgezogene bestätigte Paare – hellgrün, Dauer-Licht */}
+                  {conf.filter(c => {
+                    const nFI = new Set(night.paarungen.map(p=>p.frauId));
+                    const nMI = new Set(night.paarungen.map(p=>p.mannId));
+                    return !nFI.has(c.frauId) && !nMI.has(c.mannId);
+                  }).map((c, ci) => {
+                    const f = st.teilnehmer.frauen.find(x => x.id === c.frauId);
+                    const m = st.teilnehmer.maenner.find(x => x.id === c.mannId);
+                    return (
+                      <span key={"out"+ci} style={{ padding: "5px 12px", borderRadius: 99, fontSize: 12, fontWeight: 600, background: "#e8faf0", border: "1px solid #4a8c6a55", color: "#4a8c6a", display: "inline-flex", alignItems: "center", gap: 4 }}>
+                        💡 {f?.name?.split(" ")[0]} + {m?.name?.split(" ")[0]}
+                      </span>
+                    );
+                  })}
                   {night.paarungen.map((p, i) => {
                     const f = st.teilnehmer.frauen.find(x => x.id === p.frauId);
                     const m = st.teilnehmer.maenner.find(x => x.id === p.mannId);
