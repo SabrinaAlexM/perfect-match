@@ -671,16 +671,7 @@ function MatchingNights({ st, setSt }) {
                   ) : null;
                 })()}
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
-                  {/* Bestätigte Matches die NICHT in dieser Night standen – immer hellgrün anzeigen */}
-                  {conf.filter(c => !night.paarungen.some(p => p.frauId===c.frauId && p.mannId===c.mannId)).map((c, i) => {
-                    const f = st.teilnehmer.frauen.find(x => x.id === c.frauId);
-                    const m = st.teilnehmer.maenner.find(x => x.id === c.mannId);
-                    return (
-                      <span key={`conf-${i}`} style={{ padding: "5px 12px", borderRadius: 99, fontSize: 12, fontWeight: 600, background: "#d8f5e8", border: "1px solid #00906a33", color: "#005c38", display: "inline-flex", alignItems: "center", gap: 3, opacity: 0.75 }}>
-                        ✅ {f?.name?.split(" ")[0]} + {m?.name?.split(" ")[0]}
-                      </span>
-                    );
-                  })}
+
                   {night.paarungen.map((p, i) => {
                     const f = st.teilnehmer.frauen.find(x => x.id === p.frauId);
                     const m = st.teilnehmer.maenner.find(x => x.id === p.mannId);
