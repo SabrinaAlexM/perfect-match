@@ -666,21 +666,14 @@ function MatchingNights({ st, setSt }) {
                     const isAnnMatch = ann && (!ann.typ || ann.typ==="match");
                     const isAnnKein  = ann && ann.typ==="kein_match";
 
-                    // Auto-exclude: Person hat anderswo ein ★ oder bestätigtes Match
-                    const annMatchIds = new Set((st.annahmen||[]).filter(a=>!a.typ||a.typ==="match").map(a=>`${a.frauId}|${a.mannId}`));
-                    const confMatchFrau = new Set(conf.map(c=>c.frauId));
-                    const confMatchMann = new Set(conf.map(c=>c.mannId));
-                    const confMatchPair = new Set(conf.map(c=>`${c.frauId}|${c.mannId}`));
-                    const thisPairKey = `${p.frauId}|${p.mannId}`;
-                    const takenF = !isAnnMatch && !isConfirmed && (
-                      confMatchFrau.has(p.frauId) && !confMatchPair.has(thisPairKey) ||
-                      (st.annahmen||[]).some(a => a.frauId===p.frauId && a.mannId!==p.mannId && (!a.typ||a.typ==="match"))
-                    );
-                    const takenM = !isAnnMatch && !isConfirmed && (
-                      confMatchMann.has(p.mannId) && !confMatchPair.has(thisPairKey) ||
-                      (st.annahmen||[]).some(a => a.mannId===p.mannId && a.frauId!==p.frauId && (!a.typ||a.typ==="match"))
-                    );
-                    const isAutoExcl = takenF || takenM;
+                    // Auto-exclude: Person ist anderswo als Perfect Match bestätigt oder ★ markiert
+                    const fConfTaken = conf.some(c => c.frauId===p.frauId && c.mannId!==p.mannId);
+                    const mConfTaken = conf.some(c => c.mannId===p.mannId && c.frauId!==p.frauId);
+                    const fAnnTaken  = (st.annahmen||[]).some(a => a.frauId===p.frauId && a.mannId!==p.mannId && (!a.typ||a.typ==="match"));
+                    const mAnnTaken  = (st.annahmen||[]).some(a => a.mannId===p.mannId && a.frauId!==p.frauId && (!a.typ||a.typ==="match"));
+                    const takenF = fConfTaken || fAnnTaken;
+                    const takenM = mConfTaken || mAnnTaken;
+                    const isAutoExcl = !isAnnMatch && !isConfirmed && (takenF || takenM);
 
                     let bg, col, brd, prefix;
                     if (isConfirmed)   { bg="#b8f0d8"; col="#005c38"; brd="#00906a44"; prefix="✅ "; }
