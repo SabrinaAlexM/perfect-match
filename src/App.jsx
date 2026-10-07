@@ -683,9 +683,10 @@ function MatchingNights({ st, setSt }) {
                     const f = st.teilnehmer.frauen.find(x => x.id === p.frauId);
                     const m = st.teilnehmer.maenner.find(x => x.id === p.mannId);
                     const isConfirmed = conf.some(c => c.frauId === p.frauId && c.mannId === p.mannId);
+                    const isMbKeinMatch = st.matchboxen.some(mb => mb.ergebnis==="kein_match" && mb.frauId===p.frauId && mb.mannId===p.mannId);
                     const ann = (st.annahmen||[]).find(a => a.frauId===p.frauId && a.mannId===p.mannId);
                     const isAnnMatch = ann && (!ann.typ || ann.typ==="match");
-                    const isAnnKein  = ann && ann.typ==="kein_match";
+                    const isAnnKein  = isMbKeinMatch || (ann && ann.typ==="kein_match");
 
                     // Auto-exclude: Person ist anderswo als Perfect Match bestätigt oder ★ markiert
                     const fConfTaken = conf.some(c => c.frauId===p.frauId && c.mannId!==p.mannId);
@@ -703,7 +704,7 @@ function MatchingNights({ st, setSt }) {
                     else if (isAutoExcl)  { bg="#fef0f0"; col="#ccaaa0"; brd="#e0c0bc44"; prefix="✕ "; }
                     else               { bg="#f9f5ef"; col=C.mut; brd=C.brd; prefix=""; }
 
-                    const clickable = !isConfirmed && !isAutoExcl;
+                    const clickable = !isConfirmed && !isAutoExcl && !isMbKeinMatch;
                     return (
                       <span key={i}
                         onClick={() => {
