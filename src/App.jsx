@@ -59,17 +59,24 @@ function calcProbs(frauen, maenner, matchboxen, matchingNights, extraConf = [], 
   if (!n) return { probs: {}, aF, aM, confirmed: allConf, impossible: false };
 
   // ── Night constraints: exact pair count per night ──
+  // Build set of confirmed pair keys for quick lookup
+  const confPairKeys = new Set(allConf.map(c => `${c.frauId}|${c.mannId}`));
+
   const constraints = (matchingNights || [])
     .map(night => {
-      const needed = Math.max(0, night.lichter - confirmedCount);
-      // Only consider people who were active IN THIS night (eintrittNachNight check)
+      // Only subtract confirmed matches that ACTUALLY APPEARED in this night
+      const confInThisNight = (night.paarungen || []).filter(p => confPairKeys.has(`${p.frauId}|${p.mannId}`)).length;
+      const needed = Math.max(0, night.lichter - confInThisNight);
+      // Only consider active unconfirmed pairs in this night
       const activePairs = (night.paarungen || [])
+        .filter(p => !confPairKeys.has(`${p.frauId}|${p.mannId}`)) // skip already confirmed
         .map(p => {
           const fi = aF.findIndex(f => f.id === p.frauId && !(f.eintrittNachNight >= night.nummer));
           const mi = aM.findIndex(m => m.id === p.mannId && !(m.eintrittNachNight >= night.nummer));
           return (fi >= 0 && mi >= 0) ? fi * 100 + mi : -1;
         })
         .filter(x => x >= 0);
+      if (activePairs.length === 0 && needed === 0) return null;
       if (activePairs.length === 0) return null;
       return { needed, pairs: new Set(activePairs), total: activePairs.length };
     })
@@ -647,9 +654,13 @@ function MatchingNights({ st, setSt }) {
               <div>
                 {/* Light count summary */}
                 {(() => {
-                  const cu = night.lichter - conf.length;
-                  const annMatch = (st.annahmen||[]).filter(a => night.paarungen.some(p => p.frauId===a.frauId && p.mannId===a.mannId) && (!a.typ||a.typ==="match")).length;
-                  const annKein  = (st.annahmen||[]).filter(a => night.paarungen.some(p => p.frauId===a.frauId && p.mannId===a.mannId) && a.typ==="kein_match").length;
+                  // Only count confirmed pairs that were IN THIS night
+                  const confInNight = conf.filter(c => night.paarungen.some(p => p.frauId===c.frauId && p.mannId===c.mannId)).length;
+                  const cu = Math.max(0, night.lichter - confInNight);
+                  const annMatch = (st.annahmen||[]).filter(a =>
+                    night.paarungen.some(p => p.frauId===a.frauId && p.mannId===a.mannId) &&
+                    (!a.typ||a.typ==="match")
+                  ).length;
                   return cu > 0 ? (
                     <div style={{ fontSize: 11, color: C.warm, marginBottom: 6 }}>
                       {annMatch} von {cu} noch unbestätigten Lichtern als ★ markiert
@@ -658,6 +669,16 @@ function MatchingNights({ st, setSt }) {
                   ) : null;
                 })()}
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
+                  {/* Bestätigte Matches die NICHT in dieser Night standen – immer hellgrün anzeigen */}
+                  {conf.filter(c => !night.paarungen.some(p => p.frauId===c.frauId && p.mannId===c.mannId)).map((c, i) => {
+                    const f = st.teilnehmer.frauen.find(x => x.id === c.frauId);
+                    const m = st.teilnehmer.maenner.find(x => x.id === c.mannId);
+                    return (
+                      <span key={`conf-${i}`} style={{ padding: "5px 12px", borderRadius: 99, fontSize: 12, fontWeight: 600, background: "#d8f5e8", border: "1px solid #00906a33", color: "#005c38", display: "inline-flex", alignItems: "center", gap: 3, opacity: 0.75 }}>
+                        ✅ {f?.name?.split(" ")[0]} + {m?.name?.split(" ")[0]}
+                      </span>
+                    );
+                  })}
                   {night.paarungen.map((p, i) => {
                     const f = st.teilnehmer.frauen.find(x => x.id === p.frauId);
                     const m = st.teilnehmer.maenner.find(x => x.id === p.mannId);
@@ -1372,17 +1393,17 @@ function Analyse({ st, setSt, pd }) {
             )}
             {st.matchingNights.map(night => {
               // correctNeeded = wie viele der Lichter noch UNBESTÄTIGT sind (nicht durch Matchbox erklärt)
-              const correctNeeded = Math.max(0, night.lichter - confirmedCount);
+              const confInThisNight = (night.paarungen || []).filter(p =>
+                (confirmed||[]).some(c => c.frauId===p.frauId && c.mannId===p.mannId)
+              ).length;
+              const correctNeeded = Math.max(0, night.lichter - confInThisNight);
               // annInNight = Annahmen die in DIESER Night als Paarung stehen
               const annInNight = (night.paarungen || []).filter(p =>
                 annahmen.some(a => a.frauId === p.frauId && a.mannId === p.mannId)
               ).length;
               // confInNight = nur für Anzeige (✓), NICHT für accountedFor zählen
               // (schon durch confirmedCount in correctNeeded abgezogen)
-              const confInNight = (night.paarungen || []).filter(p =>
-                (confirmed || []).some(c => c.frauId === p.frauId && c.mannId === p.mannId)
-              ).length;
-              const accountedFor = annInNight; // NUR Annahmen zählen!
+              const accountedFor = annInNight; // confirmed already subtracted from correctNeeded
               const allFound = correctNeeded === 0 || accountedFor === correctNeeded;
               const tooMany = accountedFor > correctNeeded;
               const stillOpen = Math.max(0, correctNeeded - accountedFor);
