@@ -644,15 +644,65 @@ function MatchingNights({ st, setSt }) {
               </div>
             </div>
             {night.paarungen.length > 0 && (
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
-                {night.paarungen.map((p, i) => {
-                  const f = st.teilnehmer.frauen.find(x => x.id === p.frauId);
-                  const m = st.teilnehmer.maenner.find(x => x.id === p.mannId);
-                  const isMatch = conf.some(c => c.frauId === p.frauId && c.mannId === p.mannId);
-                  return <span key={i} style={{ padding: "3px 9px", borderRadius: 99, fontSize: 12, fontWeight: 600, background: isMatch ? "#b8f0d8" : "#f0edf9", border: `1px solid ${isMatch ? "#00906a55" : C.brd}`, color: isMatch ? "#005c38" : C.txt }}>
-                    {isMatch ? "✅ " : ""}{f?.name?.split(" ")[0]} + {m?.name?.split(" ")[0]}
-                  </span>;
-                })}
+              <div>
+                {/* Light count summary */}
+                {(() => {
+                  const cu = night.lichter - conf.length;
+                  const annMatch = (st.annahmen||[]).filter(a => night.paarungen.some(p => p.frauId===a.frauId && p.mannId===a.mannId) && (!a.typ||a.typ==="match")).length;
+                  const annKein  = (st.annahmen||[]).filter(a => night.paarungen.some(p => p.frauId===a.frauId && p.mannId===a.mannId) && a.typ==="kein_match").length;
+                  return cu > 0 ? (
+                    <div style={{ fontSize: 11, color: C.warm, marginBottom: 6 }}>
+                      {annMatch} von {cu} noch unbestätigten Lichtern als ★ markiert
+                      {annMatch === cu && <span style={{ color: C.green, fontWeight: 700 }}> · ✅ vollständig!</span>}
+                    </div>
+                  ) : null;
+                })()}
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
+                  {night.paarungen.map((p, i) => {
+                    const f = st.teilnehmer.frauen.find(x => x.id === p.frauId);
+                    const m = st.teilnehmer.maenner.find(x => x.id === p.mannId);
+                    const isConfirmed = conf.some(c => c.frauId === p.frauId && c.mannId === p.mannId);
+                    const ann = (st.annahmen||[]).find(a => a.frauId===p.frauId && a.mannId===p.mannId);
+                    const isAnnMatch = ann && (!ann.typ || ann.typ==="match");
+                    const isAnnKein  = ann && ann.typ==="kein_match";
+
+                    // Auto-exclude: if either person is taken by a ★ or confirmed match elsewhere
+                    const takenF = !isAnnMatch && !isConfirmed && (
+                      conf.some(c => c.frauId===p.frauId && c.mannId!==p.mannId) ||
+                      (st.annahmen||[]).some(a => a.frauId===p.frauId && a.mannId!==p.mannId && (!a.typ||a.typ==="match"))
+                    );
+                    const takenM = !isAnnMatch && !isConfirmed && (
+                      conf.some(c => c.mannId===p.mannId && c.frauId!==p.frauId) ||
+                      (st.annahmen||[]).some(a => a.mannId===p.mannId && a.frauId!==p.frauId && (!a.typ||a.typ==="match"))
+                    );
+                    const isAutoExcl = takenF || takenM;
+
+                    let bg, col, brd, prefix;
+                    if (isConfirmed)   { bg="#b8f0d8"; col="#005c38"; brd="#00906a44"; prefix="✅ "; }
+                    else if (isAnnMatch)  { bg="#e0f0ff"; col="#0060b0"; brd="#3b82f644"; prefix="★ "; }
+                    else if (isAnnKein)   { bg="#ffc0c8"; col="#9a0018"; brd="#ef444444"; prefix="✗ "; }
+                    else if (isAutoExcl)  { bg="#fef0f0"; col="#ccaaa0"; brd="#e0c0bc44"; prefix="✕ "; }
+                    else               { bg="#f9f5ef"; col=C.mut; brd=C.brd; prefix=""; }
+
+                    const clickable = !isConfirmed && !isAutoExcl;
+                    return (
+                      <span key={i}
+                        onClick={() => {
+                          if (!clickable) return;
+                          setSt(s => {
+                            const ann2 = s.annahmen || [];
+                            const ex = ann2.find(a => a.frauId===p.frauId && a.mannId===p.mannId);
+                            if (!ex)                return { ...s, annahmen: [...ann2, { frauId: p.frauId, mannId: p.mannId, typ: "match" }] };
+                            if (ex.typ==="match")   return { ...s, annahmen: ann2.map(a => a.frauId===p.frauId&&a.mannId===p.mannId ? {...a,typ:"kein_match"} : a) };
+                            return { ...s, annahmen: ann2.filter(a => !(a.frauId===p.frauId&&a.mannId===p.mannId)) };
+                          });
+                        }}
+                        style={{ padding: "5px 12px", borderRadius: 99, fontSize: 12, fontWeight: 600, background: bg, border: `1px solid ${brd}`, color: col, cursor: clickable ? "pointer" : "default", userSelect: "none", transition: "all 0.15s", display: "inline-flex", alignItems: "center", gap: 3 }}>
+                        {prefix}{f?.name?.split(" ")[0]} + {m?.name?.split(" ")[0]}
+                      </span>
+                    );
+                  })}
+                </div>
               </div>
             )}
           </Card>
