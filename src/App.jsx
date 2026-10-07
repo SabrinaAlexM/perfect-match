@@ -62,23 +62,35 @@ function calcProbs(frauen, maenner, matchboxen, matchingNights, extraConf = [], 
   // Build set of confirmed pair keys for quick lookup
   const confPairKeys = new Set(allConf.map(c => `${c.frauId}|${c.mannId}`));
 
+  // Correct lights formula: confirmed matches always contribute 1 light each
+  // - Case A: pair stood together in this night (standing correct)
+  // - Case B: both people already left (always-on light)
+  const lightsFromConf = (paarungen) => {
+    const nightFrauIds = new Set(paarungen.map(p => p.frauId));
+    const nightMannIds = new Set(paarungen.map(p => p.mannId));
+    const nightPairKeys = new Set(paarungen.map(p => `${p.frauId}|${p.mannId}`));
+    return allConf.filter(c => {
+      const key = `${c.frauId}|${c.mannId}`;
+      const caseA = nightPairKeys.has(key);
+      const caseB = !nightFrauIds.has(c.frauId) && !nightMannIds.has(c.mannId);
+      return caseA || caseB;
+    }).length;
+  };
+
   const constraints = (matchingNights || [])
     .map(night => {
-      // Only subtract confirmed matches that ACTUALLY APPEARED in this night
-      const confInThisNight = (night.paarungen || []).filter(p => confPairKeys.has(`${p.frauId}|${p.mannId}`)).length;
-      const needed = Math.max(0, night.lichter - confInThisNight);
-      // Only consider active unconfirmed pairs in this night
+      const lfc = lightsFromConf(night.paarungen || []);
+      const needed = Math.max(0, night.lichter - lfc);
       const activePairs = (night.paarungen || [])
-        .filter(p => !confPairKeys.has(`${p.frauId}|${p.mannId}`)) // skip already confirmed
+        .filter(p => !confPairKeys.has(`${p.frauId}|${p.mannId}`))
         .map(p => {
           const fi = aF.findIndex(f => f.id === p.frauId && !(f.eintrittNachNight >= night.nummer));
           const mi = aM.findIndex(m => m.id === p.mannId && !(m.eintrittNachNight >= night.nummer));
           return (fi >= 0 && mi >= 0) ? fi * 100 + mi : -1;
         })
         .filter(x => x >= 0);
-      if (activePairs.length === 0 && needed === 0) return null;
       if (activePairs.length === 0) return null;
-      return { needed, pairs: new Set(activePairs), total: activePairs.length };
+      return { needed, pairs: new Set(activePairs), nightNr: night.nummer };
     })
     .filter(Boolean);
 
@@ -654,9 +666,12 @@ function MatchingNights({ st, setSt }) {
               <div>
                 {/* Light count summary */}
                 {(() => {
-                  // Only count confirmed pairs that were IN THIS night
-                  const confInNight = conf.filter(c => night.paarungen.some(p => p.frauId===c.frauId && p.mannId===c.mannId)).length;
-                  const cu = Math.max(0, night.lichter - confInNight);
+                  // Correct formula: confirmed pairs that stood together OR already left
+                  const nightFIds = new Set(night.paarungen.map(p=>p.frauId));
+                  const nightMIds = new Set(night.paarungen.map(p=>p.mannId));
+                  const nightPKeys = new Set(night.paarungen.map(p=>`${p.frauId}|${p.mannId}`));
+                  const lfc = conf.filter(c => nightPKeys.has(`${c.frauId}|${c.mannId}`) || (!nightFIds.has(c.frauId) && !nightMIds.has(c.mannId))).length;
+                  const cu = Math.max(0, night.lichter - lfc);
                   const annMatch = (st.annahmen||[]).filter(a =>
                     night.paarungen.some(p => p.frauId===a.frauId && p.mannId===a.mannId) &&
                     (!a.typ||a.typ==="match")
@@ -1387,10 +1402,11 @@ function Analyse({ st, setSt, pd }) {
             )}
             {st.matchingNights.map(night => {
               // correctNeeded = wie viele der Lichter noch UNBESTÄTIGT sind (nicht durch Matchbox erklärt)
-              const confInThisNight = (night.paarungen || []).filter(p =>
-                (confirmed||[]).some(c => c.frauId===p.frauId && c.mannId===p.mannId)
-              ).length;
-              const correctNeeded = Math.max(0, night.lichter - confInThisNight);
+              const ncFIds = new Set((night.paarungen||[]).map(p=>p.frauId));
+              const ncMIds = new Set((night.paarungen||[]).map(p=>p.mannId));
+              const ncPKeys = new Set((night.paarungen||[]).map(p=>`${p.frauId}|${p.mannId}`));
+              const ncLfc = (confirmed||[]).filter(c => ncPKeys.has(`${c.frauId}|${c.mannId}`) || (!ncFIds.has(c.frauId) && !ncMIds.has(c.mannId))).length;
+              const correctNeeded = Math.max(0, night.lichter - ncLfc);
               // annInNight = Annahmen die in DIESER Night als Paarung stehen
               const annInNight = (night.paarungen || []).filter(p =>
                 annahmen.some(a => a.frauId === p.frauId && a.mannId === p.mannId)
