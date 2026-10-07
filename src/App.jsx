@@ -662,9 +662,11 @@ function MatchingNights({ st, setSt }) {
                     (!a.typ||a.typ==="match")
                   ).length;
                   return cu > 0 ? (
-                    <div style={{ fontSize: 11, color: C.warm, marginBottom: 6 }}>
-                      {annMatch} von {cu} noch unbestätigten Lichtern als ★ markiert
-                      {annMatch === cu && <span style={{ color: C.green, fontWeight: 700 }}> · ✅ vollständig!</span>}
+                    <div style={{ fontSize: 11, marginBottom: 6, fontWeight: annMatch > cu ? 700 : 400, color: annMatch > cu ? C.red : C.warm }}>
+                      {annMatch > cu
+                        ? `❌ Zu viele! Nur ${cu} korrekte Paarung${cu!==1?"en":""} möglich, du hast ${annMatch} markiert.`
+                        : <>{annMatch} von {cu} noch unbestätigten Lichtern als ★ markiert{annMatch === cu && <span style={{ color: C.green, fontWeight: 700 }}> · ✅ vollständig!</span>}</>
+                      }
                     </div>
                   ) : null;
                 })()}
